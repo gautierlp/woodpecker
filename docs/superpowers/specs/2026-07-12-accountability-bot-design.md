@@ -1,7 +1,7 @@
 # Accountability bot — design spec
 
 **Date:** 2026-07-12
-**Status:** Approved, ready for planning
+**Status:** Approved (2026-07-12), implementation plan written
 
 ## Problem
 
