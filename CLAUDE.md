@@ -7,9 +7,14 @@ postponed. Plain-language interface powered by Claude.
 Private single-user project, not a SaaS. Built to break a specific personal loop
 (postpone, guilt, paralysis), so it leans into persistent nagging by design.
 
-**Status: pre-implementation.** The design is fixed; no code exists yet. See
+**Status: implemented, not yet deployed.** All 10 plan tasks are done: the full app
+(bot, LLM, tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy
+workflow. 40 tests pass. Not yet running on `jarvis`: before the first push-to-deploy,
+register a self-hosted GitHub runner for this repo and place the real `.env` in the
+service directory. See
 `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for the full behavior,
-architecture, and rationale. The plan (once written) lives in `docs/superpowers/plans/`.
+architecture, and rationale, and `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
+for the implementation plan.
 
 ## Architecture
 
