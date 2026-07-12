@@ -83,6 +83,48 @@ def test_interpret_message_returns_parsed_intent():
     assert "taxes" in str(client.messages.calls[0])
 
 
+def test_interpret_message_sends_history_before_current_message():
+    # The follow-up bug: a bare "Yes" only resolves if Claude sees the prior turn
+    # where it offered to act. History must be prepended to the messages array,
+    # ahead of the new user message.
+    tool_block = SimpleNamespace(
+        type="tool_use",
+        name="record_intent",
+        input={"action": "block", "task_id": 32, "blocked_by": 31},
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    history = [
+        {"role": "user", "content": "is 32 blocked by 31?"},
+        {"role": "assistant", "content": "Not currently. Want me to set that up?"},
+    ]
+    llm.interpret_message("Yes", [_task()], NOW, client, history=history)
+    messages = client.messages.calls[0]["messages"]
+    assert messages == history + [{"role": "user", "content": "Yes"}]
+
+
+def test_interpret_message_without_history_sends_only_current_message():
+    # Default (no history passed) must stay a single-message conversation, so the
+    # existing callers and behavior are unaffected.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "call vet"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("call vet", [], NOW, client)
+    assert client.messages.calls[0]["messages"] == [{"role": "user", "content": "call vet"}]
+
+
+def test_prompt_instructs_resolving_followups_from_history():
+    # Given prior turns, a short reply like "yes" or "do it" must be read as the
+    # action it refers to, not as a fresh, contextless message.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [], NOW, client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "follow-up" in system or "earlier" in system or "previous" in system
+
+
 def test_interpret_message_returns_every_task_in_a_multi_task_message():
     # A single message can hold several tasks (a pasted list). Each must come back as
     # its own intent; the old code stopped after the first tool_use block and dropped

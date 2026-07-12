@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from . import bot, config, db, scheduler
+from .memory import ConversationMemory
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,9 @@ def main() -> None:
     )
 
     application = Application.builder().token(config.telegram_token()).build()
-    application.bot_data.update({"conn": conn, "client": client, "chat_id": chat_id})
+    application.bot_data.update(
+        {"conn": conn, "client": client, "chat_id": chat_id, "memory": ConversationMemory()}
+    )
     application.add_handler(CommandHandler("start", bot.handle_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
     application.add_error_handler(bot.handle_error)

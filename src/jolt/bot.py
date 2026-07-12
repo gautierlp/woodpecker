@@ -26,14 +26,18 @@ async def handle_message(update, context) -> None:
         return
     conn = context.bot_data["conn"]
     client = context.bot_data["client"]
+    memory = context.bot_data["memory"]
     now = config.now_paris()
-    logger.info("Received message (%d chars)", len(update.message.text or ""))
-    logger.debug("Inbound message body: %s", update.message.text)
+    text = update.message.text or ""
+    logger.info("Received message (%d chars)", len(text))
+    logger.debug("Inbound message body: %s", text)
     tasks = db.list_all(conn)
-    intents = llm.interpret_message(update.message.text, tasks, now, client)
+    history = memory.get(chat_id)
+    intents = llm.interpret_message(text, tasks, now, client, history=history)
     logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
     reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
     logger.debug("Reply body: %s", reply)
+    memory.add(chat_id, text, reply)
     await update.message.reply_text(reply)
 
 

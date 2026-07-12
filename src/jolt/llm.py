@@ -106,7 +106,13 @@ def _task_lines(tasks: list[Task]) -> str:
     )
 
 
-def interpret_message(message: str, tasks: list[Task], now: datetime, client) -> list[Intent]:
+def interpret_message(
+    message: str,
+    tasks: list[Task],
+    now: datetime,
+    client,
+    history: list[dict] | None = None,
+) -> list[Intent]:
     system = (
         "You are Jolt, a personal accountability bot. Read the user's message and record "
         "what it means by calling record_intent. A single message can contain several things "
@@ -124,6 +130,10 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. To "
         "remove a due date entirely, use action=edit with clear_deadline=true. A message like "
         "'change all due dates to today' becomes one edit call per pending task. "
+        "You may be given earlier turns of this conversation before the latest message. Use them to "
+        "resolve short follow-ups: if your previous turn offered to do something and the user replies "
+        "'yes', 'do it', 'the first one' and the like, treat it as confirming that action and record "
+        "the concrete intent (for example the block you proposed), not a contextless answer. "
         "For a question or a blocker conversation, use "
         "action=answer and write a short, plain reply (no cheerleading, no em dashes). The user may "
         "write in any language, but always store the task text in English (translate it if needed). "
@@ -131,7 +141,13 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
         "Current backlog:\n" + _task_lines(tasks)
     )
-    logger.debug("interpret_message: %d pending task(s) in context", len(tasks))
+    messages = list(history or [])
+    messages.append({"role": "user", "content": message})
+    logger.debug(
+        "interpret_message: %d pending task(s), %d prior turn(s) in context",
+        len(tasks),
+        len(messages) - 1,
+    )
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=1000,
@@ -140,7 +156,7 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         # "any" forces at least one record_intent call but, unlike naming the tool,
         # still allows Claude to emit one call per task in a multi-task message.
         tool_choice={"type": "any"},
-        messages=[{"role": "user", "content": message}],
+        messages=messages,
     )
     _log_usage("interpret_message", response)
     intents = [

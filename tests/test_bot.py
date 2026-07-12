@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 from jolt import bot, db
 from jolt.llm import Intent
+from jolt.memory import ConversationMemory
 
 
 def fresh():
@@ -17,9 +18,16 @@ def make_update(text, chat_id=42):
     return SimpleNamespace(message=message, effective_chat=SimpleNamespace(id=chat_id))
 
 
-def make_context(conn, intent, chat_id=42):
+def make_context(conn, intent, chat_id=42, memory=None):
     # client is unused because interpret_message is monkeypatched in the test
-    return SimpleNamespace(bot_data={"conn": conn, "client": object(), "chat_id": chat_id})
+    return SimpleNamespace(
+        bot_data={
+            "conn": conn,
+            "client": object(),
+            "chat_id": chat_id,
+            "memory": memory or ConversationMemory(),
+        }
+    )
 
 
 def test_handle_message_adds_task_and_replies(monkeypatch):
@@ -27,7 +35,7 @@ def test_handle_message_adds_task_and_replies(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client: [Intent(action="add", text="call vet")],
+        lambda msg, tasks, now, client, history=None: [Intent(action="add", text="call vet")],
     )
     update = make_update("remind me to call vet")
     context = make_context(conn, None)
@@ -42,7 +50,7 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client: [
+        lambda msg, tasks, now, client, history=None: [
             Intent(action="add", text="cancel gym"),
             Intent(action="add", text="file taxes"),
             Intent(action="add", text="file expenses"),
@@ -56,6 +64,48 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
     assert "cancel gym" in reply
     assert "file taxes" in reply
     assert "file expenses" in reply
+
+
+def test_handle_message_passes_prior_history_to_llm(monkeypatch):
+    # The follow-up fix: the previous turn must reach interpret_message so a bare
+    # "Yes" can be resolved.
+    conn = fresh()
+    memory = ConversationMemory()
+    memory.add(42, "is 32 blocked by 31?", "Not currently. Want me to set that up?")
+    seen = {}
+
+    def capture(msg, tasks, now, client, history=None):
+        seen["history"] = history
+        return [Intent(action="answer", reply="ok")]
+
+    monkeypatch.setattr(bot.llm, "interpret_message", capture)
+    update = make_update("Yes")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert seen["history"] == [
+        {"role": "user", "content": "is 32 blocked by 31?"},
+        {"role": "assistant", "content": "Not currently. Want me to set that up?"},
+    ]
+
+
+def test_handle_message_records_turn_in_memory(monkeypatch):
+    # After replying, the exchange must be stored so the *next* message has context.
+    conn = fresh()
+    memory = ConversationMemory()
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client, history=None: [
+            Intent(action="answer", reply="Want me to set that up?")
+        ],
+    )
+    update = make_update("is 32 blocked by 31?")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert memory.get(42) == [
+        {"role": "user", "content": "is 32 blocked by 31?"},
+        {"role": "assistant", "content": "Want me to set that up?"},
+    ]
 
 
 def test_handle_message_ignores_foreign_chat(monkeypatch):
