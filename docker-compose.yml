@@ -6,5 +6,7 @@ services:
     env_file: .env
     environment:
       JOLT_DB_PATH: /app/data/jolt.db
+      # DEBUG traces message bodies and full Claude I/O; flip to INFO to quieten.
+      JOLT_LOG_LEVEL: DEBUG
     volumes:
       - ./data:/app/data
