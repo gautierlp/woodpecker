@@ -1,13 +1,42 @@
-name: deploy
+name: Deploy to jarvis
 
 on:
   push:
     branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-jarvis-jolt
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, jarvis, linux]
     steps:
-      - uses: actions/checkout@v4
-      - name: Build and restart the container
-        run: docker compose up -d --build
+      - name: Pull latest into the production checkout
+        run: |
+          git config --global --add safe.directory /home/gautier/docker/jolt
+          cd /home/gautier/docker/jolt
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Rebuild and restart stack
+        run: |
+          cd /home/gautier/docker/jolt
+          docker compose up -d --build
+
+      - name: Verify the container is running
+        run: |
+          cd /home/gautier/docker/jolt
+          # Long-polling bot with no HTTP port: health = container stays up.
+          sleep 5
+          running=$(docker compose ps --status running -q | wc -l | tr -d ' ')
+          if [ "$running" -lt 1 ]; then
+            echo "::error::jolt container is not running"
+            docker compose ps
+            docker compose logs --tail 80
+            exit 1
+          fi
+          docker compose ps
+          docker compose logs --tail 20 || true
+          echo "deploy ok: container running"
