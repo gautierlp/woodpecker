@@ -209,3 +209,55 @@ def test_write_nag_returns_text():
     client = FakeClient(SimpleNamespace(content=[text_block]))
     out = llm.write_nag(_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
     assert "taxes" in out
+
+
+def test_parse_block_intent():
+    intent = llm.parse_intent({"action": "block", "task_id": 1, "blocked_by": 3})
+    assert intent.action == "block"
+    assert intent.task_id == 1
+    assert intent.blocked_by == 3
+
+
+def test_parse_unblock_intent():
+    intent = llm.parse_intent({"action": "unblock", "task_id": 2})
+    assert intent.action == "unblock"
+    assert intent.task_id == 2
+    assert intent.blocked_by is None
+
+
+def test_tool_enum_includes_block_and_unblock():
+    actions = llm._TOOL["input_schema"]["properties"]["action"]["enum"]
+    assert "block" in actions
+    assert "unblock" in actions
+
+
+def test_prompt_mentions_dependencies():
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [], NOW, client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "block" in system
+
+
+def test_interpret_message_maps_dependency_to_two_block_intents():
+    # "1 and 2 need 3 first" must become one block intent per blocked task.
+    blocks = [
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "block", "task_id": 1, "blocked_by": 3},
+        ),
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "block", "task_id": 2, "blocked_by": 3},
+        ),
+    ]
+    client = FakeClient(SimpleNamespace(content=blocks))
+    intents = llm.interpret_message("1 and 2 need 3 first", [_task()], NOW, client)
+    assert [(i.action, i.task_id, i.blocked_by) for i in intents] == [
+        ("block", 1, 3),
+        ("block", 2, 3),
+    ]

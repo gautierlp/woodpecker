@@ -32,6 +32,7 @@ class Intent:
     priority: str | None = None
     deadline: date | None = None
     task_id: int | None = None
+    blocked_by: int | None = None
     reply: str | None = None
 
 
@@ -43,6 +44,7 @@ def parse_intent(tool_input: dict) -> Intent:
         priority=tool_input.get("priority"),
         deadline=date.fromisoformat(deadline) if deadline else None,
         task_id=tool_input.get("task_id"),
+        blocked_by=tool_input.get("blocked_by"),
         reply=tool_input.get("reply"),
     )
 
@@ -55,8 +57,8 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "complete", "drop", "list", "answer"],
-                "description": "add a task, complete/drop an existing one, list the backlog, or answer a question / reply to the user.",
+                "enum": ["add", "complete", "drop", "block", "unblock", "list", "answer"],
+                "description": "add a task, complete/drop an existing one, block a task on another / unblock it, list the backlog, or answer a question / reply to the user.",
             },
             "text": {"type": "string", "description": "Task text, for action=add."},
             "priority": {
@@ -71,6 +73,10 @@ _TOOL = {
             "task_id": {
                 "type": "integer",
                 "description": "The id of the existing task, for complete/drop.",
+            },
+            "blocked_by": {
+                "type": "integer",
+                "description": "For action=block: the id of the prerequisite task that must be finished first.",
             },
             "reply": {
                 "type": "string",
@@ -102,10 +108,13 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         "task or action, never fold several tasks into one. When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. To complete or drop a task, "
-        "pick the matching task_id from the current backlog. For a question or a blocker "
-        "conversation, use action=answer and write a short, plain reply (no cheerleading, "
-        "no em dashes). The user may write in any language, but always store the task text in "
-        "English (translate it if needed). "
+        "pick the matching task_id from the current backlog. When the user says one task must "
+        "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
+        "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
+        "the prerequisite task's id; emit one block call per blocked task. To lift a dependency, use "
+        "action=unblock with the task_id. For a question or a blocker conversation, use "
+        "action=answer and write a short, plain reply (no cheerleading, no em dashes). The user may "
+        "write in any language, but always store the task text in English (translate it if needed). "
         f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
         "Current backlog:\n" + _task_lines(tasks)
