@@ -67,9 +67,23 @@ def test_render_orders_and_formats_line():
     out = render.render_backlog(tasks, NOW)
     lines = out.splitlines()
     assert lines[0] == "Backlog:"
-    # important task sorts first
-    assert lines[1] == "1. 🟠 call vet (due 2026-12-01)"
-    assert lines[2] == "2. ⚪ tidy desk"
+    # important task sorts first; each line is numbered by its stable id
+    assert lines[1] == "2. 🟠 call vet (due 2026-12-01)"
+    assert lines[2] == "1. ⚪ tidy desk"
+
+
+def test_lines_are_numbered_by_id_not_position():
+    # An important task sorts to the top but keeps a higher id: the visible number
+    # must be its id (7), so a reference the user types resolves to the same task
+    # the bot acts on. Numbering by sort position would show "1." here and break
+    # "complete 7" / "3 blocks 7".
+    tasks = [
+        make(3, text="tidy desk"),
+        make(7, text="call vet", priority=PRIORITY_IMPORTANT, deadline=date(2026, 12, 1)),
+    ]
+    lines = render.render_backlog(tasks, NOW).splitlines()
+    assert lines[1] == "7. 🟠 call vet (due 2026-12-01)"
+    assert lines[2] == "3. ⚪ tidy desk"
 
 
 def test_blocked_task_shows_neutral_dot_and_tag():

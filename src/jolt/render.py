@@ -15,15 +15,17 @@ def render_backlog(tasks: list[Task], now: datetime) -> str:
     ordered = order_backlog(tasks)
     if not ordered:
         return "Backlog empty. Nice."
-    position = {task.id: i for i, task in enumerate(ordered, 1)}
     lines = ["Backlog:"]
-    for i, task in enumerate(ordered, 1):
+    # Number each line by the task's stable id, not its sort position: the id is what
+    # the LLM and orchestrator key on, so a number the user types back ("complete 7",
+    # "3 blocks 7") resolves to the same task they see here.
+    for task in ordered:
         due = f" (due {task.deadline.isoformat()})" if task.deadline else ""
         if is_blocked(task, tasks):
             dot = "⚪"
-            tag = f" (blocked by {position[task.blocked_by]})"
+            tag = f" (blocked by {task.blocked_by})"
         else:
             dot = _dot(task, now)
             tag = ""
-        lines.append(f"{i}. {dot} {task.text}{due}{tag}")
+        lines.append(f"{task.id}. {dot} {task.text}{due}{tag}")
     return "\n".join(lines)
