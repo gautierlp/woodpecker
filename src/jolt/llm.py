@@ -60,7 +60,7 @@ def _task_lines(tasks: list[Task]) -> str:
         return "(backlog is empty)"
     return "\n".join(
         f"- id={t.id}: {t.text}"
-        + (f" [important]" if t.priority == "important" else "")
+        + (" [important]" if t.priority == "important" else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
         for t in pending
     )
