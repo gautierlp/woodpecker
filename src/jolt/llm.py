@@ -34,6 +34,7 @@ class Intent:
     task_id: int | None = None
     blocked_by: int | None = None
     reply: str | None = None
+    clear_deadline: bool = False
 
 
 def parse_intent(tool_input: dict) -> Intent:
@@ -46,6 +47,7 @@ def parse_intent(tool_input: dict) -> Intent:
         task_id=tool_input.get("task_id"),
         blocked_by=tool_input.get("blocked_by"),
         reply=tool_input.get("reply"),
+        clear_deadline=tool_input.get("clear_deadline", False),
     )
 
 
@@ -57,8 +59,8 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "complete", "drop", "block", "unblock", "list", "answer"],
-                "description": "add a task, complete/drop an existing one, block a task on another / unblock it, list the backlog, or answer a question / reply to the user.",
+                "enum": ["add", "complete", "drop", "edit", "block", "unblock", "list", "answer"],
+                "description": "add a task, complete/drop an existing one, edit an existing task's deadline/priority/text, block a task on another / unblock it, list the backlog, or answer a question / reply to the user.",
             },
             "text": {"type": "string", "description": "Task text, for action=add."},
             "priority": {
@@ -72,7 +74,7 @@ _TOOL = {
             },
             "task_id": {
                 "type": "integer",
-                "description": "The id of the existing task, for complete/drop.",
+                "description": "The id of the existing task, for complete/drop/edit.",
             },
             "blocked_by": {
                 "type": "integer",
@@ -81,6 +83,10 @@ _TOOL = {
             "reply": {
                 "type": "string",
                 "description": "For action=answer: the exact message to send back to the user.",
+            },
+            "clear_deadline": {
+                "type": "boolean",
+                "description": "For action=edit only: set true to remove a task's due date entirely. Leave unset to keep the current due date.",
             },
         },
         "required": ["action"],
@@ -112,7 +118,13 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
         "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
         "the prerequisite task's id; emit one block call per blocked task. To lift a dependency, use "
-        "action=unblock with the task_id. For a question or a blocker conversation, use "
+        "action=unblock with the task_id. "
+        "To change an existing task rather than add a new one, use action=edit with its task_id "
+        "and only the fields that change: a new deadline, a new priority (normal/important), or "
+        "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. To "
+        "remove a due date entirely, use action=edit with clear_deadline=true. A message like "
+        "'change all due dates to today' becomes one edit call per pending task. "
+        "For a question or a blocker conversation, use "
         "action=answer and write a short, plain reply (no cheerleading, no em dashes). The user may "
         "write in any language, but always store the task text in English (translate it if needed). "
         f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "

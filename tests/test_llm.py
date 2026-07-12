@@ -261,3 +261,61 @@ def test_interpret_message_maps_dependency_to_two_block_intents():
         ("block", 1, 3),
         ("block", 2, 3),
     ]
+
+
+def test_parse_edit_intent_with_deadline():
+    intent = llm.parse_intent({"action": "edit", "task_id": 4, "deadline": "2026-07-12"})
+    assert intent.action == "edit"
+    assert intent.task_id == 4
+    assert intent.deadline == date(2026, 7, 12)
+    assert intent.clear_deadline is False
+
+
+def test_parse_edit_intent_with_clear_deadline():
+    intent = llm.parse_intent({"action": "edit", "task_id": 4, "clear_deadline": True})
+    assert intent.action == "edit"
+    assert intent.clear_deadline is True
+    assert intent.deadline is None
+
+
+def test_tool_enum_includes_edit():
+    actions = llm._TOOL["input_schema"]["properties"]["action"]["enum"]
+    assert "edit" in actions
+
+
+def test_tool_schema_exposes_clear_deadline():
+    assert "clear_deadline" in llm._TOOL["input_schema"]["properties"]
+
+
+def test_prompt_mentions_edit():
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [], NOW, client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "edit" in system
+
+
+def test_interpret_message_maps_bulk_reschedule_to_edit_per_task():
+    # "change all due dates to today" -> one edit intent per pending task, each with today.
+    blocks = [
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "edit", "task_id": 1, "deadline": "2026-07-12"},
+        ),
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "edit", "task_id": 2, "deadline": "2026-07-12"},
+        ),
+    ]
+    client = FakeClient(SimpleNamespace(content=blocks))
+    intents = llm.interpret_message(
+        "change all due dates to today", [_task(1), _task(2)], NOW, client
+    )
+    assert [(i.action, i.task_id, i.deadline) for i in intents] == [
+        ("edit", 1, date(2026, 7, 12)),
+        ("edit", 2, date(2026, 7, 12)),
+    ]
