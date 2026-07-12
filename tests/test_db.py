@@ -131,6 +131,69 @@ def test_dropping_blocker_clears_dependents():
     assert db.get_task(conn, dep.id).blocked_by is None
 
 
+def test_update_task_changes_only_given_fields():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "call vet", PRIORITY_NORMAL, date(2026, 7, 15), now)
+    updated = db.update_task(conn, t.id, priority=PRIORITY_IMPORTANT)
+    assert updated.priority == PRIORITY_IMPORTANT
+    assert updated.text == "call vet"  # untouched
+    assert updated.deadline == date(2026, 7, 15)  # untouched
+
+
+def test_update_task_sets_deadline():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
+    updated = db.update_task(conn, t.id, deadline=date(2026, 7, 12))
+    assert updated.deadline == date(2026, 7, 12)
+
+
+def test_update_task_clears_deadline_with_explicit_none():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, date(2026, 7, 15), now)
+    updated = db.update_task(conn, t.id, deadline=None)
+    assert updated.deadline is None
+
+
+def test_update_task_default_leaves_deadline_untouched():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, date(2026, 7, 15), now)
+    updated = db.update_task(conn, t.id, text="renamed")
+    assert updated.deadline == date(2026, 7, 15)  # not cleared by the default
+
+
+def test_update_task_never_touches_created_at():
+    conn = fresh()
+    created = datetime(2026, 7, 1, 8, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, created)
+    db.update_task(conn, t.id, deadline=date(2026, 7, 20))
+    assert db.get_task(conn, t.id).created_at == created
+
+
+def test_update_task_no_fields_is_noop():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
+    updated = db.update_task(conn, t.id)
+    assert updated.text == "x"
+
+
+def test_update_task_on_done_returns_none():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
+    db.complete_task(conn, t.id, now)
+    assert db.update_task(conn, t.id, priority=PRIORITY_IMPORTANT) is None
+
+
+def test_update_task_missing_returns_none():
+    conn = fresh()
+    assert db.update_task(conn, 999, priority=PRIORITY_IMPORTANT) is None
+
+
 def test_init_db_migrates_existing_table_without_blocked_by():
     conn = db.connect(":memory:")
     # Simulate the live table created before the blocked_by column existed.

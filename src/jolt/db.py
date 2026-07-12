@@ -3,6 +3,8 @@ from datetime import date, datetime
 
 from .models import STATUS_DONE, STATUS_DROPPED, STATUS_PENDING, Task
 
+_UNSET = object()
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +112,29 @@ def block_task(conn, task_id: int, blocked_by: int) -> Task | None:
     cur = conn.execute(
         "UPDATE tasks SET blocked_by = ? WHERE id = ? AND status = ?",
         (blocked_by, task_id, STATUS_PENDING),
+    )
+    conn.commit()
+    return get_task(conn, task_id) if cur.rowcount else None
+
+
+def update_task(conn, task_id, *, text=None, priority=None, deadline=_UNSET) -> Task | None:
+    assignments = []
+    values = []
+    if text is not None:
+        assignments.append("text = ?")
+        values.append(text)
+    if priority is not None:
+        assignments.append("priority = ?")
+        values.append(priority)
+    if deadline is not _UNSET:
+        assignments.append("deadline = ?")
+        values.append(deadline.isoformat() if deadline else None)
+    if not assignments:
+        return get_task(conn, task_id)
+    values.extend([task_id, STATUS_PENDING])
+    cur = conn.execute(
+        f"UPDATE tasks SET {', '.join(assignments)} WHERE id = ? AND status = ?",
+        values,
     )
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
