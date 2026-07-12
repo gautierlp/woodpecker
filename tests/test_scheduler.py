@@ -39,7 +39,7 @@ def test_daily_focus_sends_prose_then_backlog():
     scheduler.send_daily_focus(conn, send, FakeClient(), now)
     assert len(sent) == 1
     assert "canned prose" in sent[0]
-    assert "Backlog:" in sent[0]
+    assert "📋 " in sent[0]
     assert "call vet" in sent[0]
 
 

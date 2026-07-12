@@ -51,7 +51,7 @@ def test_list_intent_renders_backlog():
     db.add_task(conn, "call vet", "important", None, NOW)
     reply = orchestrator.apply_intent(conn, Intent(action="list"), NOW)
     assert "call vet" in reply
-    assert reply.startswith("Backlog:")
+    assert reply.startswith("📋 ")
 
 
 def test_answer_intent_passes_reply_through():
