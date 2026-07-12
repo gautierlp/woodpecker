@@ -66,7 +66,7 @@
 
 [![Jolt][product-cover]](docs/assets/jolt-social.png)
 
-> 🚧 **Built, not yet deployed.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)); it is not yet running on the homelab host. The Usage section below describes the intended interface.
+> ✅ **Deployed and running.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)) and it is live on the homelab host `jarvis`, auto-deploying on push to `main`. The Usage section below describes the interface.
 
 Jolt is a private Telegram bot that fights task avoidance. It is an ordinary todo list (you keep a full backlog and mean to clear all of it), with one specific twist: instead of sitting there passively like every other list, Jolt **actively pushes you at the tasks you keep avoiding**, ranked by how much you are dodging them. An important task that has sat untouched for days is the signal it is being deferred, and that is exactly what Jolt shoves back in your face.
 
@@ -124,7 +124,7 @@ cp .env.example .env          # then fill in your Telegram + Anthropic keys
 uv run python src/main.py     # run locally
 ```
 
-> This runs the built app locally. Deployment to the homelab host is the remaining step; track it in the [Roadmap](#roadmap).
+> This runs the app locally. It is also deployed on the homelab host `jarvis`, auto-deploying on push to `main` (see the [Roadmap](#roadmap)).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -177,7 +177,7 @@ Keep dodging and it escalates. Say "it's a someday thing" and it backs off. The 
 - [x] Stale detection + daily-focus selection (pure, tested)
 - [x] Claude message interpretation + intent classification
 - [x] Telegram layer + scheduler (06:00 focus, nags, stale-scan)
-- [ ] Deploy to `jarvis` (Docker + git auto-deploy)
+- [x] Deploy to `jarvis` (Docker + git auto-deploy)
 
 See the [open issues](https://github.com/gautierlp/jolt/issues) for the running list.
 
@@ -222,7 +222,7 @@ Project Link: [https://github.com/gautierlp/jolt](https://github.com/gautierlp/j
 [python-url]: https://www.python.org/
 [claude-shield]: https://img.shields.io/badge/powered%20by-Claude-D97757.svg?style=for-the-badge&logo=anthropic&logoColor=white
 [claude-url]: https://www.anthropic.com/claude
-[status-shield]: https://img.shields.io/badge/status-built%2C%20not%20deployed-E11D48.svg?style=for-the-badge
+[status-shield]: https://img.shields.io/badge/status-deployed%20%26%20running-16A34A.svg?style=for-the-badge
 [status-url]: #roadmap
 [product-cover]: docs/assets/jolt-social.png
 [python-badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white
