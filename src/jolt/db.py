@@ -1,0 +1,96 @@
+import sqlite3
+from datetime import date, datetime
+
+from .models import STATUS_DONE, STATUS_DROPPED, STATUS_PENDING, Task
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    deadline TEXT,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    last_nagged_at TEXT,
+    completed_at TEXT
+);
+"""
+
+
+def connect(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db(conn: sqlite3.Connection) -> None:
+    conn.execute(_SCHEMA)
+    conn.commit()
+
+
+def _dt(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+def _d(value: str | None) -> date | None:
+    return date.fromisoformat(value) if value else None
+
+
+def _row_to_task(row: sqlite3.Row) -> Task:
+    return Task(
+        id=row["id"],
+        text=row["text"],
+        priority=row["priority"],
+        deadline=_d(row["deadline"]),
+        created_at=_dt(row["created_at"]),
+        status=row["status"],
+        last_nagged_at=_dt(row["last_nagged_at"]),
+        completed_at=_dt(row["completed_at"]),
+    )
+
+
+def add_task(conn, text: str, priority: str, deadline: date | None, created_at: datetime) -> Task:
+    cur = conn.execute(
+        "INSERT INTO tasks (text, priority, deadline, created_at, status) VALUES (?, ?, ?, ?, ?)",
+        (text, priority, deadline.isoformat() if deadline else None, created_at.isoformat(), STATUS_PENDING),
+    )
+    conn.commit()
+    return get_task(conn, cur.lastrowid)
+
+
+def get_task(conn, task_id: int) -> Task | None:
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    return _row_to_task(row) if row else None
+
+
+def list_pending(conn) -> list[Task]:
+    rows = conn.execute("SELECT * FROM tasks WHERE status = ?", (STATUS_PENDING,)).fetchall()
+    return [_row_to_task(r) for r in rows]
+
+
+def list_all(conn) -> list[Task]:
+    rows = conn.execute("SELECT * FROM tasks").fetchall()
+    return [_row_to_task(r) for r in rows]
+
+
+def complete_task(conn, task_id: int, completed_at: datetime) -> Task | None:
+    cur = conn.execute(
+        "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ? AND status = ?",
+        (STATUS_DONE, completed_at.isoformat(), task_id, STATUS_PENDING),
+    )
+    conn.commit()
+    return get_task(conn, task_id) if cur.rowcount else None
+
+
+def drop_task(conn, task_id: int) -> Task | None:
+    cur = conn.execute(
+        "UPDATE tasks SET status = ? WHERE id = ? AND status = ?",
+        (STATUS_DROPPED, task_id, STATUS_PENDING),
+    )
+    conn.commit()
+    return get_task(conn, task_id) if cur.rowcount else None
+
+
+def mark_nagged(conn, task_id: int, when: datetime) -> None:
+    conn.execute("UPDATE tasks SET last_nagged_at = ? WHERE id = ?", (when.isoformat(), task_id))
+    conn.commit()
