@@ -13,14 +13,18 @@ logger = logging.getLogger(__name__)
 
 def setup_logging() -> None:
     """Configure root logging once, at process start. Level is driven by JOLT_LOG_LEVEL
-    (default INFO; set DEBUG to trace everything). The very chatty third-party loggers
-    are pinned to WARNING so our own lines stay readable."""
+    (default INFO; set DEBUG to trace everything). Even at DEBUG we keep the flood in
+    check: our own jolt.* loggers run at the root level, third-party libraries are capped
+    at INFO, and the byte-level HTTP loggers are pinned to WARNING. So DEBUG still shows
+    Jolt's own lines and full Claude I/O without drowning them in poll-loop chatter."""
     logging.basicConfig(
         level=config.log_level(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    for noisy in ("httpcore", "hpack", "apscheduler.scheduler", "telegram.ext.Updater"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+    for lib in ("telegram", "httpx", "anthropic", "apscheduler"):
+        logging.getLogger(lib).setLevel(logging.INFO)
+    for wire in ("httpcore", "hpack"):
+        logging.getLogger(wire).setLevel(logging.WARNING)
 
 
 def _make_send(application, chat_id):
