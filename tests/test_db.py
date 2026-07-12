@@ -2,7 +2,13 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from jolt import db
-from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_DROPPED, STATUS_PENDING
+from jolt.models import (
+    PRIORITY_IMPORTANT,
+    PRIORITY_NORMAL,
+    STATUS_DONE,
+    STATUS_DROPPED,
+    STATUS_PENDING,
+)
 
 TZ = ZoneInfo("Europe/Paris")
 

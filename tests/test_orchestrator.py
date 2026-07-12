@@ -17,7 +17,8 @@ def fresh():
 def test_add_intent_creates_task_and_confirms():
     conn = fresh()
     reply = orchestrator.apply_intent(
-        conn, Intent(action="add", text="call vet", deadline=date(2026, 7, 15)), NOW)
+        conn, Intent(action="add", text="call vet", deadline=date(2026, 7, 15)), NOW
+    )
     assert "call vet" in reply
     assert "2026-07-15" in reply
     assert len(db.list_pending(conn)) == 1
@@ -55,5 +56,7 @@ def test_list_intent_renders_backlog():
 
 def test_answer_intent_passes_reply_through():
     conn = fresh()
-    reply = orchestrator.apply_intent(conn, Intent(action="answer", reply="Do the taxes first."), NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="answer", reply="Do the taxes first."), NOW
+    )
     assert reply == "Do the taxes first."

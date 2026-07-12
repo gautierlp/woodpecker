@@ -52,7 +52,13 @@ def _row_to_task(row: sqlite3.Row) -> Task:
 def add_task(conn, text: str, priority: str, deadline: date | None, created_at: datetime) -> Task:
     cur = conn.execute(
         "INSERT INTO tasks (text, priority, deadline, created_at, status) VALUES (?, ?, ?, ?, ?)",
-        (text, priority, deadline.isoformat() if deadline else None, created_at.isoformat(), STATUS_PENDING),
+        (
+            text,
+            priority,
+            deadline.isoformat() if deadline else None,
+            created_at.isoformat(),
+            STATUS_PENDING,
+        ),
     )
     conn.commit()
     return get_task(conn, cur.lastrowid)

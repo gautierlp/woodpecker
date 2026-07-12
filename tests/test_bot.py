@@ -24,8 +24,11 @@ def make_context(conn, intent, chat_id=42):
 
 def test_handle_message_adds_task_and_replies(monkeypatch):
     conn = fresh()
-    monkeypatch.setattr(bot.llm, "interpret_message",
-                        lambda msg, tasks, now, client: [Intent(action="add", text="call vet")])
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client: [Intent(action="add", text="call vet")],
+    )
     update = make_update("remind me to call vet")
     context = make_context(conn, None)
     asyncio.run(bot.handle_message(update, context))
@@ -36,12 +39,15 @@ def test_handle_message_adds_task_and_replies(monkeypatch):
 
 def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
     conn = fresh()
-    monkeypatch.setattr(bot.llm, "interpret_message",
-                        lambda msg, tasks, now, client: [
-                            Intent(action="add", text="cancel gym"),
-                            Intent(action="add", text="file taxes"),
-                            Intent(action="add", text="file expenses"),
-                        ])
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client: [
+            Intent(action="add", text="cancel gym"),
+            Intent(action="add", text="file taxes"),
+            Intent(action="add", text="file expenses"),
+        ],
+    )
     update = make_update("(three tasks at once)")
     context = make_context(conn, None)
     asyncio.run(bot.handle_message(update, context))

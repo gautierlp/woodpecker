@@ -13,20 +13,27 @@ WELCOME = (
 
 async def handle_start(update, context) -> None:
     if update.effective_chat.id != context.bot_data["chat_id"]:
+        logger.warning("Ignoring /start from unauthorized chat %s", update.effective_chat.id)
         return
+    logger.info("Handling /start")
     await update.message.reply_text(WELCOME)
 
 
 async def handle_message(update, context) -> None:
     chat_id = context.bot_data["chat_id"]
     if update.effective_chat.id != chat_id:
+        logger.warning("Ignoring message from unauthorized chat %s", update.effective_chat.id)
         return
     conn = context.bot_data["conn"]
     client = context.bot_data["client"]
     now = config.now_paris()
+    logger.info("Received message (%d chars)", len(update.message.text or ""))
+    logger.debug("Inbound message body: %s", update.message.text)
     tasks = db.list_all(conn)
     intents = llm.interpret_message(update.message.text, tasks, now, client)
+    logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
     reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
+    logger.debug("Reply body: %s", reply)
     await update.message.reply_text(reply)
 
 

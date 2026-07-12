@@ -3,7 +3,11 @@ from zoneinfo import ZoneInfo
 
 from jolt import selection
 from jolt.models import (
-    PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task,
+    PRIORITY_IMPORTANT,
+    PRIORITY_NORMAL,
+    STATUS_DONE,
+    STATUS_PENDING,
+    Task,
 )
 
 TZ = ZoneInfo("Europe/Paris")
@@ -11,8 +15,16 @@ NOW = datetime(2026, 7, 12, 8, tzinfo=TZ)
 
 
 def make(id, *, priority=PRIORITY_NORMAL, deadline=None, created=NOW, status=STATUS_PENDING):
-    return Task(id=id, text=f"t{id}", priority=priority, deadline=deadline,
-                created_at=created, status=status, last_nagged_at=None, completed_at=None)
+    return Task(
+        id=id,
+        text=f"t{id}",
+        priority=priority,
+        deadline=deadline,
+        created_at=created,
+        status=status,
+        last_nagged_at=None,
+        completed_at=None,
+    )
 
 
 def test_important_sorts_before_normal():

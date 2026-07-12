@@ -1,3 +1,4 @@
+import logging
 import os
 
 from anthropic import Anthropic
@@ -7,23 +8,45 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from . import bot, config, db, scheduler
 
+logger = logging.getLogger(__name__)
+
+
+def setup_logging() -> None:
+    """Configure root logging once, at process start. Level is driven by JOLT_LOG_LEVEL
+    (default INFO; set DEBUG to trace everything). The very chatty third-party loggers
+    are pinned to WARNING so our own lines stay readable."""
+    logging.basicConfig(
+        level=config.log_level(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    for noisy in ("httpcore", "hpack", "apscheduler.scheduler", "telegram.ext.Updater"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 
 def _make_send(application, chat_id):
     async def _send_async(text):
         await application.bot.send_message(chat_id=chat_id, text=text)
 
     def send(text):
+        logger.info("Sending message to chat %s (%d chars)", chat_id, len(text))
+        logger.debug("Outbound message body: %s", text)
         application.create_task(_send_async(text))
 
     return send
 
 
 def main() -> None:
+    setup_logging()
+    logger.info("Starting Jolt")
     os.makedirs(os.path.dirname(config.db_path()) or ".", exist_ok=True)
+    logger.info("Opening database at %s", config.db_path())
     conn = db.connect(config.db_path())
     db.init_db(conn)
     client = Anthropic(api_key=config.anthropic_api_key())
     chat_id = config.telegram_chat_id()
+    logger.info(
+        "Configured for chat_id=%s, model=%s, timezone=%s", chat_id, config.MODEL, config.TIMEZONE
+    )
 
     application = Application.builder().token(config.telegram_token()).build()
     application.bot_data.update({"conn": conn, "client": client, "chat_id": chat_id})
@@ -43,7 +66,13 @@ def main() -> None:
             CronTrigger(hour=nag_hour, minute=0),
         )
     sched.start()
+    logger.info(
+        "Scheduler started: daily focus at %02d:00, nags at %s",
+        config.DAILY_FOCUS_HOUR,
+        ", ".join(f"{h:02d}:00" for h in config.NAG_HOURS),
+    )
 
+    logger.info("Starting Telegram polling")
     application.run_polling()
 
 

@@ -1,8 +1,24 @@
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
 from . import config
 from .models import DailyFocus, PRIORITY_IMPORTANT, Task
+
+logger = logging.getLogger(__name__)
+
+
+def _log_usage(label: str, response) -> None:
+    """Record model, token usage and stop reason for one Claude call, so cost and
+    truncation issues are visible in the logs."""
+    usage = getattr(response, "usage", None)
+    logger.info(
+        "Claude %s: stop=%s in=%s out=%s",
+        label,
+        getattr(response, "stop_reason", "?"),
+        getattr(usage, "input_tokens", "?"),
+        getattr(usage, "output_tokens", "?"),
+    )
 
 
 def _importance(task: Task) -> str:
@@ -43,11 +59,23 @@ _TOOL = {
                 "description": "add a task, complete/drop an existing one, list the backlog, or answer a question / reply to the user.",
             },
             "text": {"type": "string", "description": "Task text, for action=add."},
-            "priority": {"type": "string", "enum": ["normal", "important"],
-                         "description": "For action=add: always judge this from the wording and stakes, never leave it blank. 'important' for anything with real consequences (a deadline, money, health, admin/legal weight); 'normal' otherwise."},
-            "deadline": {"type": "string", "description": "ISO date YYYY-MM-DD, if the user gave one."},
-            "task_id": {"type": "integer", "description": "The id of the existing task, for complete/drop."},
-            "reply": {"type": "string", "description": "For action=answer: the exact message to send back to the user."},
+            "priority": {
+                "type": "string",
+                "enum": ["normal", "important"],
+                "description": "For action=add: always judge this from the wording and stakes, never leave it blank. 'important' for anything with real consequences (a deadline, money, health, admin/legal weight); 'normal' otherwise.",
+            },
+            "deadline": {
+                "type": "string",
+                "description": "ISO date YYYY-MM-DD, if the user gave one.",
+            },
+            "task_id": {
+                "type": "integer",
+                "description": "The id of the existing task, for complete/drop.",
+            },
+            "reply": {
+                "type": "string",
+                "description": "For action=answer: the exact message to send back to the user.",
+            },
         },
         "required": ["action"],
     },
@@ -82,6 +110,7 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
         "Current backlog:\n" + _task_lines(tasks)
     )
+    logger.debug("interpret_message: %d pending task(s) in context", len(tasks))
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=1000,
@@ -92,12 +121,16 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
         tool_choice={"type": "any"},
         messages=[{"role": "user", "content": message}],
     )
+    _log_usage("interpret_message", response)
     intents = [
         parse_intent(block.input)
         for block in response.content
         if getattr(block, "type", None) == "tool_use"
     ]
-    return intents or [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
+    if not intents:
+        logger.warning("Claude returned no tool_use block; falling back to clarification reply")
+        return [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
+    return intents
 
 
 def _text_of(response) -> str:
@@ -111,9 +144,12 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
     if focus.focus is None:
         return "Nothing on the list today. Enjoy it."
     age = (now - focus.focus.created_at).days
-    rescues = "; ".join(
-        f"{t.text} ({(now - t.created_at).days}d old, {_importance(t)})" for t in focus.rescues
-    ) or "none"
+    rescues = (
+        "; ".join(
+            f"{t.text} ({(now - t.created_at).days}d old, {_importance(t)})" for t in focus.rescues
+        )
+        or "none"
+    )
     system = (
         "You are Jolt. Write a short morning message (2 to 4 lines, no em dashes). Lead with the "
         "one focus task as the single thing to hit today, and push harder on important tasks than "
@@ -121,10 +157,14 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
         "is blocking them. Be plain and direct, never guilt-tripping."
     )
     user = f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)}). Rescues: {rescues}."
-    return _text_of(client.messages.create(
-        model=config.MODEL, max_tokens=300, system=system,
+    response = client.messages.create(
+        model=config.MODEL,
+        max_tokens=300,
+        system=system,
         messages=[{"role": "user", "content": user}],
-    ))
+    )
+    _log_usage("write_focus", response)
+    return _text_of(response)
 
 
 def write_nag(task: Task, now: datetime, client) -> str:
@@ -137,7 +177,11 @@ def write_nag(task: Task, now: datetime, client) -> str:
         "what is actually blocking it before pushing. Never guilt-trip."
     )
     user = f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. Current hour: {now.hour}."
-    return _text_of(client.messages.create(
-        model=config.MODEL, max_tokens=200, system=system,
+    response = client.messages.create(
+        model=config.MODEL,
+        max_tokens=200,
+        system=system,
         messages=[{"role": "user", "content": user}],
-    ))
+    )
+    _log_usage("write_nag", response)
+    return _text_of(response)

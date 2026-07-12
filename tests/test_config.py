@@ -18,9 +18,14 @@ def test_now_paris_is_timezone_aware():
 
 def test_task_and_focus_construct():
     t = Task(
-        id=1, text="call vet", priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 15),
+        id=1,
+        text="call vet",
+        priority=PRIORITY_IMPORTANT,
+        deadline=date(2026, 7, 15),
         created_at=datetime(2026, 7, 12, tzinfo=ZoneInfo("Europe/Paris")),
-        status=STATUS_PENDING, last_nagged_at=None, completed_at=None,
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
     )
     focus = DailyFocus(focus=t, rescues=[])
     assert focus.focus.text == "call vet"

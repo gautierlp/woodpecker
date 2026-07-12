@@ -9,10 +9,14 @@ TZ = ZoneInfo("Europe/Paris")
 
 
 def test_parse_add_with_deadline_and_priority():
-    intent = llm.parse_intent({
-        "action": "add", "text": "call vet",
-        "priority": "important", "deadline": "2026-07-15",
-    })
+    intent = llm.parse_intent(
+        {
+            "action": "add",
+            "text": "call vet",
+            "priority": "important",
+            "deadline": "2026-07-15",
+        }
+    )
     assert intent.action == "add"
     assert intent.text == "call vet"
     assert intent.priority == PRIORITY_IMPORTANT
@@ -52,17 +56,25 @@ class FakeClient:
 
 
 def _task(id=1):
-    return Task(id=id, text="taxes", priority=PRIORITY_NORMAL, deadline=None,
-                created_at=datetime(2026, 7, 1, tzinfo=TZ), status=STATUS_PENDING,
-                last_nagged_at=None, completed_at=None)
+    return Task(
+        id=id,
+        text="taxes",
+        priority=PRIORITY_NORMAL,
+        deadline=None,
+        created_at=datetime(2026, 7, 1, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+    )
 
 
 NOW = datetime(2026, 7, 12, 15, tzinfo=TZ)
 
 
 def test_interpret_message_returns_parsed_intent():
-    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
-                                 input={"action": "add", "text": "call vet"})
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "call vet"}
+    )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     intents = llm.interpret_message("remind me to call vet", [_task()], NOW, client)
     assert [i.action for i in intents] == ["add"]
@@ -76,12 +88,21 @@ def test_interpret_message_returns_every_task_in_a_multi_task_message():
     # its own intent; the old code stopped after the first tool_use block and dropped
     # the rest (a real bug: five pasted tasks, only "Cancel gym subscription" saved).
     blocks = [
-        SimpleNamespace(type="tool_use", name="record_intent",
-                        input={"action": "add", "text": "cancel gym subscription"}),
-        SimpleNamespace(type="tool_use", name="record_intent",
-                        input={"action": "add", "text": "file late tax returns"}),
-        SimpleNamespace(type="tool_use", name="record_intent",
-                        input={"action": "add", "text": "file late expense reports"}),
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "add", "text": "cancel gym subscription"},
+        ),
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "add", "text": "file late tax returns"},
+        ),
+        SimpleNamespace(
+            type="tool_use",
+            name="record_intent",
+            input={"action": "add", "text": "file late expense reports"},
+        ),
     ]
     client = FakeClient(SimpleNamespace(content=blocks))
     intents = llm.interpret_message("(a list of five tasks)", [], NOW, client)
@@ -95,8 +116,9 @@ def test_interpret_message_returns_every_task_in_a_multi_task_message():
 def test_interpret_message_allows_parallel_tool_calls():
     # tool_choice must permit more than one record_intent call per turn, otherwise a
     # multi-task message can only ever yield a single task.
-    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
-                                 input={"action": "add", "text": "call vet"})
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "call vet"}
+    )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     llm.interpret_message("call vet", [], NOW, client)
     tool_choice = client.messages.calls[0]["tool_choice"]
@@ -114,8 +136,9 @@ def test_interpret_message_falls_back_when_no_tool_call():
 def test_interpret_prompt_includes_today_for_relative_dates():
     # "tomorrow evening" only resolves if Claude knows today's date; without it the
     # deadline is hallucinated (a real bug: it once saved 2025-01-09 for "demain soir").
-    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
-                                 input={"action": "add", "text": "invoices"})
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "invoices"}
+    )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     llm.interpret_message("invoices by tomorrow evening", [], NOW, client)
     assert "2026-07-12" in client.messages.calls[0]["system"]
@@ -123,8 +146,9 @@ def test_interpret_prompt_includes_today_for_relative_dates():
 
 def test_interpret_prompt_instructs_english_task_text():
     # Tasks are often typed in French but must be stored in English.
-    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
-                                 input={"action": "add", "text": "invoices"})
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "invoices"}
+    )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     llm.interpret_message("factures client", [], NOW, client)
     assert "english" in client.messages.calls[0]["system"].lower()
@@ -133,8 +157,9 @@ def test_interpret_prompt_instructs_english_task_text():
 def test_interpret_prompt_instructs_importance_inference():
     # Most tasks are captured casually with no explicit priority, so the prompt must
     # tell Claude to judge importance rather than only copy an explicit signal.
-    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
-                                 input={"action": "add", "text": "book the vet"})
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "book the vet"}
+    )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     llm.interpret_message("book the vet", [], NOW, client)
     system = client.messages.calls[0]["system"].lower()
@@ -142,9 +167,16 @@ def test_interpret_prompt_instructs_importance_inference():
 
 
 def _important_task(id=1):
-    return Task(id=id, text="file the tax return", priority=PRIORITY_IMPORTANT, deadline=None,
-                created_at=datetime(2026, 7, 3, tzinfo=TZ), status=STATUS_PENDING,
-                last_nagged_at=None, completed_at=None)
+    return Task(
+        id=id,
+        text="file the tax return",
+        priority=PRIORITY_IMPORTANT,
+        deadline=None,
+        created_at=datetime(2026, 7, 3, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+    )
 
 
 def test_write_nag_passes_importance_to_prompt():

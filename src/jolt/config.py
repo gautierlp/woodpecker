@@ -30,3 +30,7 @@ def anthropic_api_key() -> str:
 
 def db_path() -> str:
     return os.environ.get("JOLT_DB_PATH", "data/jolt.db")
+
+
+def log_level() -> str:
+    return os.environ.get("JOLT_LOG_LEVEL", "INFO").upper()

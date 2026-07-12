@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from . import db
@@ -5,19 +6,29 @@ from .llm import Intent
 from .models import PRIORITY_NORMAL
 from .render import render_backlog
 
+logger = logging.getLogger(__name__)
+
 
 def apply_intent(conn, intent: Intent, now: datetime) -> str:
+    logger.info("Applying intent action=%s task_id=%s", intent.action, intent.task_id)
     if intent.action == "add":
-        task = db.add_task(conn, intent.text, intent.priority or PRIORITY_NORMAL, intent.deadline, now)
+        task = db.add_task(
+            conn, intent.text, intent.priority or PRIORITY_NORMAL, intent.deadline, now
+        )
+        logger.info(
+            "Added task id=%s priority=%s deadline=%s", task.id, task.priority, task.deadline
+        )
         ack = f'Got it. "{task.text}" saved.'
         if task.deadline:
             ack += f" Due {task.deadline.isoformat()}."
         return ack
     if intent.action == "complete":
         task = db.complete_task(conn, intent.task_id, now)
+        logger.info("Complete task_id=%s: %s", intent.task_id, "ok" if task else "not found")
         return "Done, nice." if task else "Couldn't find that one."
     if intent.action == "drop":
         task = db.drop_task(conn, intent.task_id)
+        logger.info("Drop task_id=%s: %s", intent.task_id, "ok" if task else "not found")
         return "Dropped." if task else "Couldn't find that one."
     if intent.action == "list":
         return render_backlog(db.list_all(conn), now)
