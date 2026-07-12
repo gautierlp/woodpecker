@@ -29,6 +29,7 @@ def main() -> None:
     application.bot_data.update({"conn": conn, "client": client, "chat_id": chat_id})
     application.add_handler(CommandHandler("start", bot.handle_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
+    application.add_error_handler(bot.handle_error)
 
     send = _make_send(application, chat_id)
     sched = BackgroundScheduler(timezone=config.TIMEZONE)

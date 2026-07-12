@@ -63,3 +63,26 @@ def test_handle_start_ignores_foreign_chat():
     context = make_context(fresh(), None, chat_id=42)
     asyncio.run(bot.handle_start(update, context))
     update.message.reply_text.assert_not_awaited()
+
+
+def make_error_context(error, chat_id=42):
+    return SimpleNamespace(
+        error=error,
+        bot=SimpleNamespace(send_message=AsyncMock()),
+        bot_data={"chat_id": chat_id},
+    )
+
+
+def test_handle_error_notifies_user():
+    context = make_error_context(RuntimeError("boom"))
+    asyncio.run(bot.handle_error(make_update("hi"), context))
+    context.bot.send_message.assert_awaited_once()
+    assert context.bot.send_message.call_args.kwargs["chat_id"] == 42
+
+
+def test_handle_error_swallows_notify_failure():
+    # If even the notification can't be sent (e.g. Telegram unreachable), the
+    # error handler must not raise, or the failure cascades.
+    context = make_error_context(RuntimeError("boom"))
+    context.bot.send_message.side_effect = RuntimeError("telegram down")
+    asyncio.run(bot.handle_error(make_update("hi"), context))  # must not raise
