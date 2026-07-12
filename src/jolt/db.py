@@ -130,7 +130,8 @@ def update_task(conn, task_id, *, text=None, priority=None, deadline=_UNSET) -> 
         assignments.append("deadline = ?")
         values.append(deadline.isoformat() if deadline else None)
     if not assignments:
-        return get_task(conn, task_id)
+        task = get_task(conn, task_id)
+        return task if task and task.status == STATUS_PENDING else None
     values.extend([task_id, STATUS_PENDING])
     cur = conn.execute(
         f"UPDATE tasks SET {', '.join(assignments)} WHERE id = ? AND status = ?",

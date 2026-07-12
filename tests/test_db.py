@@ -181,6 +181,14 @@ def test_update_task_no_fields_is_noop():
     assert updated.text == "x"
 
 
+def test_update_task_no_fields_on_done_returns_none():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
+    db.complete_task(conn, t.id, now)
+    assert db.update_task(conn, t.id) is None
+
+
 def test_update_task_on_done_returns_none():
     conn = fresh()
     now = datetime(2026, 7, 12, tzinfo=TZ)
