@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from .models import PRIORITY_IMPORTANT, Task
-from .selection import is_stale, is_urgent, order_backlog
+from .selection import is_blocked, is_stale, is_urgent, order_backlog
 
 
 def _dot(task: Task, now: datetime) -> str:
@@ -15,8 +15,15 @@ def render_backlog(tasks: list[Task], now: datetime) -> str:
     ordered = order_backlog(tasks)
     if not ordered:
         return "Backlog empty. Nice."
+    position = {task.id: i for i, task in enumerate(ordered, 1)}
     lines = ["Backlog:"]
     for i, task in enumerate(ordered, 1):
         due = f" (due {task.deadline.isoformat()})" if task.deadline else ""
-        lines.append(f"{i}. {_dot(task, now)} {task.text}{due}")
+        if is_blocked(task, tasks):
+            dot = "⚪"
+            tag = f" (blocked by {position[task.blocked_by]})"
+        else:
+            dot = _dot(task, now)
+            tag = ""
+        lines.append(f"{i}. {dot} {task.text}{due}{tag}")
     return "\n".join(lines)

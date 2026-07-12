@@ -10,7 +10,7 @@ FRESH = datetime(2026, 7, 3, tzinfo=TZ)  # 1 day old at NOW -> not stale
 OLD = datetime(2026, 6, 20, tzinfo=TZ)  # ~2 weeks old at NOW -> stale
 
 
-def make(id, *, text, priority=PRIORITY_NORMAL, deadline=None, created_at=FRESH):
+def make(id, *, text, priority=PRIORITY_NORMAL, deadline=None, created_at=FRESH, blocked_by=None):
     return Task(
         id=id,
         text=text,
@@ -20,6 +20,7 @@ def make(id, *, text, priority=PRIORITY_NORMAL, deadline=None, created_at=FRESH)
         status=STATUS_PENDING,
         last_nagged_at=None,
         completed_at=None,
+        blocked_by=blocked_by,
     )
 
 
@@ -69,3 +70,14 @@ def test_render_orders_and_formats_line():
     # important task sorts first
     assert lines[1] == "1. 🟠 call vet (due 2026-12-01)"
     assert lines[2] == "2. ⚪ tidy desk"
+
+
+def test_blocked_task_shows_neutral_dot_and_tag():
+    blocker = make(1, text="do accounts")
+    dep = make(
+        2, text="submit expenses", priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 1), blocked_by=1
+    )
+    out = render.render_backlog([blocker, dep], NOW)
+    lines = out.splitlines()
+    assert lines[1] == "1. ⚪ do accounts"
+    assert lines[2] == "2. ⚪ submit expenses (due 2026-07-01) (blocked by 1)"
