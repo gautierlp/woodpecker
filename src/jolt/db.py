@@ -89,7 +89,8 @@ def complete_task(conn, task_id: int, completed_at: datetime) -> Task | None:
         "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ? AND status = ?",
         (STATUS_DONE, completed_at.isoformat(), task_id, STATUS_PENDING),
     )
-    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
+    if cur.rowcount:
+        conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
 
@@ -99,7 +100,8 @@ def drop_task(conn, task_id: int) -> Task | None:
         "UPDATE tasks SET status = ? WHERE id = ? AND status = ?",
         (STATUS_DROPPED, task_id, STATUS_PENDING),
     )
-    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
+    if cur.rowcount:
+        conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
 
