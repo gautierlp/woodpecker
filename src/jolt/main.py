@@ -3,7 +3,7 @@ import os
 from anthropic import Anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from telegram.ext import Application, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from . import bot, config, db, scheduler
 
@@ -27,6 +27,7 @@ def main() -> None:
 
     application = Application.builder().token(config.telegram_token()).build()
     application.bot_data.update({"conn": conn, "client": client, "chat_id": chat_id})
+    application.add_handler(CommandHandler("start", bot.handle_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
 
     send = _make_send(application, chat_id)

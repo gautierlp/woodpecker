@@ -48,3 +48,18 @@ def test_handle_message_ignores_foreign_chat(monkeypatch):
     asyncio.run(bot.handle_message(update, context))
     assert called is False
     update.message.reply_text.assert_not_awaited()
+
+
+def test_handle_start_replies_with_welcome():
+    update = make_update("/start")
+    context = make_context(fresh(), None)
+    asyncio.run(bot.handle_start(update, context))
+    update.message.reply_text.assert_awaited_once()
+    assert "Jolt" in update.message.reply_text.call_args.args[0]
+
+
+def test_handle_start_ignores_foreign_chat():
+    update = make_update("/start", chat_id=999)
+    context = make_context(fresh(), None, chat_id=42)
+    asyncio.run(bot.handle_start(update, context))
+    update.message.reply_text.assert_not_awaited()
