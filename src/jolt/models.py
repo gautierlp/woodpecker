@@ -19,6 +19,7 @@ class Task:
     status: str
     last_nagged_at: datetime | None
     completed_at: datetime | None
+    blocked_by: int | None = None
 
 
 @dataclass(frozen=True)

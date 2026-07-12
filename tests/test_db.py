@@ -79,3 +79,67 @@ def test_mark_nagged_updates_timestamp():
     t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
     db.mark_nagged(conn, t.id, datetime(2026, 7, 12, 19, tzinfo=TZ))
     assert db.get_task(conn, t.id).last_nagged_at == datetime(2026, 7, 12, 19, tzinfo=TZ)
+
+
+def test_add_task_defaults_blocked_by_none():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "x", PRIORITY_NORMAL, None, now)
+    assert t.blocked_by is None
+
+
+def test_block_task_sets_blocked_by():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "a", PRIORITY_NORMAL, None, now)
+    b = db.add_task(conn, "b", PRIORITY_NORMAL, None, now)
+    updated = db.block_task(conn, a.id, b.id)
+    assert updated.blocked_by == b.id
+    assert db.get_task(conn, a.id).blocked_by == b.id
+
+
+def test_unblock_task_clears_blocked_by():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "a", PRIORITY_NORMAL, None, now)
+    b = db.add_task(conn, "b", PRIORITY_NORMAL, None, now)
+    db.block_task(conn, a.id, b.id)
+    updated = db.unblock_task(conn, a.id)
+    assert updated.blocked_by is None
+
+
+def test_completing_blocker_clears_dependents():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    blocker = db.add_task(conn, "blocker", PRIORITY_NORMAL, None, now)
+    dep1 = db.add_task(conn, "dep1", PRIORITY_NORMAL, None, now)
+    dep2 = db.add_task(conn, "dep2", PRIORITY_NORMAL, None, now)
+    db.block_task(conn, dep1.id, blocker.id)
+    db.block_task(conn, dep2.id, blocker.id)
+    db.complete_task(conn, blocker.id, now)
+    assert db.get_task(conn, dep1.id).blocked_by is None
+    assert db.get_task(conn, dep2.id).blocked_by is None
+
+
+def test_dropping_blocker_clears_dependents():
+    conn = fresh()
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    blocker = db.add_task(conn, "blocker", PRIORITY_NORMAL, None, now)
+    dep = db.add_task(conn, "dep", PRIORITY_NORMAL, None, now)
+    db.block_task(conn, dep.id, blocker.id)
+    db.drop_task(conn, blocker.id)
+    assert db.get_task(conn, dep.id).blocked_by is None
+
+
+def test_init_db_migrates_existing_table_without_blocked_by():
+    conn = db.connect(":memory:")
+    # Simulate the live table created before the blocked_by column existed.
+    conn.execute(
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, "
+        "priority TEXT NOT NULL, deadline TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL, "
+        "last_nagged_at TEXT, completed_at TEXT)"
+    )
+    conn.commit()
+    db.init_db(conn)
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    assert "blocked_by" in cols

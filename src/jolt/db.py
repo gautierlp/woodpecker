@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     last_nagged_at TEXT,
-    completed_at TEXT
+    completed_at TEXT,
+    blocked_by INTEGER
 );
 """
 
@@ -25,6 +26,9 @@ def connect(path: str) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(_SCHEMA)
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    if "blocked_by" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN blocked_by INTEGER")
     conn.commit()
 
 
@@ -46,6 +50,7 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         status=row["status"],
         last_nagged_at=_dt(row["last_nagged_at"]),
         completed_at=_dt(row["completed_at"]),
+        blocked_by=row["blocked_by"],
     )
 
 
@@ -84,6 +89,7 @@ def complete_task(conn, task_id: int, completed_at: datetime) -> Task | None:
         "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ? AND status = ?",
         (STATUS_DONE, completed_at.isoformat(), task_id, STATUS_PENDING),
     )
+    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
 
@@ -93,8 +99,24 @@ def drop_task(conn, task_id: int) -> Task | None:
         "UPDATE tasks SET status = ? WHERE id = ? AND status = ?",
         (STATUS_DROPPED, task_id, STATUS_PENDING),
     )
+    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE blocked_by = ?", (task_id,))
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
+
+
+def block_task(conn, task_id: int, blocked_by: int) -> Task | None:
+    cur = conn.execute(
+        "UPDATE tasks SET blocked_by = ? WHERE id = ? AND status = ?",
+        (blocked_by, task_id, STATUS_PENDING),
+    )
+    conn.commit()
+    return get_task(conn, task_id) if cur.rowcount else None
+
+
+def unblock_task(conn, task_id: int) -> Task | None:
+    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE id = ?", (task_id,))
+    conn.commit()
+    return get_task(conn, task_id)
 
 
 def mark_nagged(conn, task_id: int, when: datetime) -> None:
