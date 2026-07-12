@@ -136,10 +136,60 @@ def test_no_deadline_line_has_no_date_suffix():
     assert task_line(make(1, text="a")) == "1. ⚪ a"
 
 
-def test_blocked_task_shows_neutral_dot_and_tag():
+def test_blocked_task_nests_under_blocker_with_arrow():
     blocker = make(1, text="do accounts", deadline=TODAY)
     dep = make(2, text="submit expenses", priority=PRIORITY_IMPORTANT, deadline=TODAY, blocked_by=1)
-    out = render.render_backlog([blocker, dep], NOW)
-    lines = out.splitlines()
+    lines = render.render_backlog([blocker, dep], NOW).splitlines()
+    # blocker renders as a normal top-level line...
     assert "1. ⚪ do accounts" in lines
-    assert "2. ⚪ submit expenses (blocked by 1)" in lines
+    # ...and the dependent nests under it with an arrow, neutral dot, no "(blocked by)" tag.
+    assert "   ↳ 2. ⚪ submit expenses" in lines
+    assert not any("blocked by" in line for line in lines)
+
+
+def test_chain_indents_by_depth():
+    a = make(1, text="investigate", deadline=TODAY)
+    b = make(2, text="order", deadline=TODAY, blocked_by=1)
+    c = make(3, text="confirm", deadline=TODAY, blocked_by=2)
+    lines = render.render_backlog([a, b, c], NOW).splitlines()
+    assert "1. ⚪ investigate" in lines
+    assert "   ↳ 2. ⚪ order" in lines
+    assert "      ↳ 3. ⚪ confirm" in lines
+
+
+def test_nested_child_drops_date_suffix():
+    # A child due later than its blocker still nests under the blocker and shows no date.
+    blocker = make(1, text="parent", deadline=TODAY)
+    dep = make(2, text="child", deadline=date(2026, 8, 1), blocked_by=1)
+    lines = render.render_backlog([blocker, dep], NOW).splitlines()
+    assert "   ↳ 2. ⚪ child" in lines
+
+
+def test_child_grouped_under_blockers_day_not_its_own():
+    # Child's own deadline is next month, but it must sit in the blocker's TODAY group.
+    blocker = make(1, text="parent", deadline=TODAY)
+    dep = make(2, text="child", deadline=date(2026, 8, 1), blocked_by=1)
+    out = render.render_backlog([blocker, dep], NOW)
+    assert "📆 LATER" not in out  # child did not create a LATER group
+    today_block = out.split("🔥 TODAY")[1]
+    assert "child" in today_block
+
+
+def test_completed_blocker_promotes_child_to_top_level():
+    # Blocker is done -> child is no longer blocked: it renders as a plain top-level task.
+    blocker = Task(
+        id=1,
+        text="parent",
+        priority=PRIORITY_NORMAL,
+        deadline=TODAY,
+        created_at=FRESH,
+        status="done",
+        last_nagged_at=None,
+        completed_at=NOW,
+        blocked_by=None,
+    )
+    dep = make(2, text="child", deadline=TODAY, blocked_by=1)
+    lines = render.render_backlog([blocker, dep], NOW).splitlines()
+    assert "parent" not in "\n".join(lines)  # done tasks are not listed
+    assert "2. ⚪ child" in lines  # promoted: no arrow, no indent
+    assert "   ↳" not in "\n".join(lines)
