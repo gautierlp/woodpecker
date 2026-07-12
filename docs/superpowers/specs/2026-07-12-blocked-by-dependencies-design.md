@@ -48,9 +48,12 @@ task 1 → `blocked_by=3`, task 2 → `blocked_by=3`. The rarer reverse ("this n
 different things first") is intentionally unsupported to keep a single column and avoid
 a join table. Revisit only if it comes up in real use.
 
-Existing rows get `blocked_by = NULL` by default, so the column is added idempotently to
-the `CREATE TABLE` (matching the current `init_db` pattern) and no data migration is
-needed for the single-user SQLite file.
+The column is added in two places so both a fresh install and the live deployed DB are
+covered: it goes into the `CREATE TABLE IF NOT EXISTS` (for new SQLite files), and
+`init_db` also runs an idempotent `ALTER TABLE tasks ADD COLUMN blocked_by INTEGER`
+guarded by a `PRAGMA table_info` check (for the already-existing table on `jarvis`,
+which `CREATE TABLE IF NOT EXISTS` would otherwise leave untouched). Existing rows get
+`blocked_by = NULL`. No other data migration is needed.
 
 ## Behavior
 
