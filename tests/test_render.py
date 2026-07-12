@@ -7,8 +7,7 @@ from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_PENDING, Tas
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 4, 12, tzinfo=TZ)  # a Saturday
 TODAY = NOW.date()
-FRESH = datetime(2026, 7, 3, tzinfo=TZ)  # 1 day old at NOW -> not stale
-OLD = datetime(2026, 6, 20, tzinfo=TZ)  # ~2 weeks old at NOW -> stale
+FRESH = datetime(2026, 7, 3, tzinfo=TZ)  # 1 day old at NOW
 
 
 def make(id, *, text, priority=PRIORITY_NORMAL, deadline=None, created_at=FRESH, blocked_by=None):
@@ -30,38 +29,8 @@ def task_line(task):
     return render.render_backlog([task], NOW).splitlines()[-1]
 
 
-def dot_of(task):
-    return task_line(task).split(" ", 2)[1]
-
-
 def test_empty_backlog_message():
     assert render.render_backlog([], NOW) == "Backlog empty. Nice."
-
-
-def test_important_overdue_is_red():
-    assert dot_of(make(1, text="x", priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 1))) == "🔴"
-
-
-def test_important_due_soon_is_red():
-    assert dot_of(make(1, text="x", priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 6))) == "🔴"
-
-
-def test_important_stale_no_deadline_is_red():
-    assert dot_of(make(1, text="x", priority=PRIORITY_IMPORTANT, created_at=OLD)) == "🔴"
-
-
-def test_important_not_urgent_is_orange():
-    assert (
-        dot_of(make(1, text="x", priority=PRIORITY_IMPORTANT, deadline=date(2026, 12, 1))) == "🟠"
-    )
-
-
-def test_normal_stale_is_yellow():
-    assert dot_of(make(1, text="x", created_at=OLD)) == "🟡"
-
-
-def test_normal_fresh_is_white():
-    assert dot_of(make(1, text="x")) == "⚪"
 
 
 def test_header_shows_task_count():
@@ -115,25 +84,25 @@ def test_empty_buckets_are_omitted():
 
 def test_overdue_line_shows_days_late():
     task = make(1, text="pay tax", deadline=date(2026, 7, 1))  # 3 days before NOW
-    assert task_line(task) == "1. ⚪ pay tax (3d overdue)"
+    assert task_line(task) == "1. pay tax (3d overdue)"
 
 
 def test_today_and_tomorrow_lines_have_no_date_suffix():
-    assert task_line(make(1, text="a", deadline=TODAY)) == "1. ⚪ a"
-    assert task_line(make(1, text="b", deadline=date(2026, 7, 5))) == "1. ⚪ b"
+    assert task_line(make(1, text="a", deadline=TODAY)) == "1. a"
+    assert task_line(make(1, text="b", deadline=date(2026, 7, 5))) == "1. b"
 
 
 def test_this_week_line_shows_weekday():
     # 2026-07-08 is a Wednesday
-    assert task_line(make(1, text="a", deadline=date(2026, 7, 8))) == "1. ⚪ a (Wed)"
+    assert task_line(make(1, text="a", deadline=date(2026, 7, 8))) == "1. a (Wed)"
 
 
 def test_later_line_shows_month_and_day():
-    assert task_line(make(1, text="a", deadline=date(2026, 8, 1))) == "1. ⚪ a (Aug 01)"
+    assert task_line(make(1, text="a", deadline=date(2026, 8, 1))) == "1. a (Aug 01)"
 
 
 def test_no_deadline_line_has_no_date_suffix():
-    assert task_line(make(1, text="a")) == "1. ⚪ a"
+    assert task_line(make(1, text="a")) == "1. a"
 
 
 def test_blocked_task_nests_under_blocker_with_arrow():
@@ -141,9 +110,9 @@ def test_blocked_task_nests_under_blocker_with_arrow():
     dep = make(2, text="submit expenses", priority=PRIORITY_IMPORTANT, deadline=TODAY, blocked_by=1)
     lines = render.render_backlog([blocker, dep], NOW).splitlines()
     # blocker renders as a normal top-level line...
-    assert "1. ⚪ do accounts" in lines
-    # ...and the dependent nests under it with an arrow, neutral dot, no "(blocked by)" tag.
-    assert "   ↳ 2. ⚪ submit expenses" in lines
+    assert "1. do accounts" in lines
+    # ...and the dependent nests under it with an arrow, no "(blocked by)" tag.
+    assert "   ↳ 2. submit expenses" in lines
     assert not any("blocked by" in line for line in lines)
 
 
@@ -152,9 +121,9 @@ def test_chain_indents_by_depth():
     b = make(2, text="order", deadline=TODAY, blocked_by=1)
     c = make(3, text="confirm", deadline=TODAY, blocked_by=2)
     lines = render.render_backlog([a, b, c], NOW).splitlines()
-    assert "1. ⚪ investigate" in lines
-    assert "   ↳ 2. ⚪ order" in lines
-    assert "      ↳ 3. ⚪ confirm" in lines
+    assert "1. investigate" in lines
+    assert "   ↳ 2. order" in lines
+    assert "      ↳ 3. confirm" in lines
 
 
 def test_nested_child_drops_date_suffix():
@@ -162,7 +131,7 @@ def test_nested_child_drops_date_suffix():
     blocker = make(1, text="parent", deadline=TODAY)
     dep = make(2, text="child", deadline=date(2026, 8, 1), blocked_by=1)
     lines = render.render_backlog([blocker, dep], NOW).splitlines()
-    assert "   ↳ 2. ⚪ child" in lines
+    assert "   ↳ 2. child" in lines
 
 
 def test_child_grouped_under_blockers_day_not_its_own():
@@ -191,5 +160,5 @@ def test_completed_blocker_promotes_child_to_top_level():
     dep = make(2, text="child", deadline=TODAY, blocked_by=1)
     lines = render.render_backlog([blocker, dep], NOW).splitlines()
     assert "parent" not in "\n".join(lines)  # done tasks are not listed
-    assert "2. ⚪ child" in lines  # promoted: no arrow, no indent
+    assert "2. child" in lines  # promoted: no arrow, no indent
     assert "   ↳" not in "\n".join(lines)

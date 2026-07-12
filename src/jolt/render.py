@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 
-from .models import PRIORITY_IMPORTANT, Task
-from .selection import is_stale, is_urgent, order_backlog
+from .models import Task
+from .selection import order_backlog
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -15,13 +15,6 @@ _GROUPS = [
     ("later", "📆 LATER"),
     ("none", "📥 NO DEADLINE"),
 ]
-
-
-def _dot(task: Task, now: datetime) -> str:
-    # Urgency-aware scale: the redder the dot, the more it should bug you.
-    if task.priority == PRIORITY_IMPORTANT:
-        return "🔴" if is_urgent(task, now) else "🟠"
-    return "🟡" if is_stale(task, now) else "⚪"
 
 
 def _bucket(deadline: date | None, today: date) -> str:
@@ -95,11 +88,11 @@ def render_backlog(tasks: list[Task], now: datetime) -> str:
             # ("complete 7", "3 blocks 7") resolves to the same task they see here.
             depth, _ = _chain(task, by_id)
             if depth:
-                # Blocked child: indent under its blocker, neutral dot, no date (it is
-                # gated by the parent, so its own deadline is not actionable yet).
+                # Blocked child: indent under its blocker, no date (it is gated by the
+                # parent, so its own deadline is not actionable yet).
                 indent = "   " * depth
-                lines.append(f"{indent}↳ {task.id}. ⚪ {task.text}")
+                lines.append(f"{indent}↳ {task.id}. {task.text}")
             else:
                 suffix = _date_suffix(task.deadline, today)
-                lines.append(f"{task.id}. {_dot(task, now)} {task.text}{suffix}")
+                lines.append(f"{task.id}. {task.text}{suffix}")
     return "\n".join(lines)
