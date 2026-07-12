@@ -60,3 +60,58 @@ def test_answer_intent_passes_reply_through():
         conn, Intent(action="answer", reply="Do the taxes first."), NOW
     )
     assert reply == "Do the taxes first."
+
+
+def test_block_intent_sets_dependency_and_confirms():
+    conn = fresh()
+    a = db.add_task(conn, "submit expenses", "important", None, NOW)
+    b = db.add_task(conn, "do accounts", "important", None, NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="block", task_id=a.id, blocked_by=b.id), NOW
+    )
+    assert db.get_task(conn, a.id).blocked_by == b.id
+    assert "do accounts" in reply
+
+
+def test_unblock_intent_clears_dependency():
+    conn = fresh()
+    a = db.add_task(conn, "a", "normal", None, NOW)
+    b = db.add_task(conn, "b", "normal", None, NOW)
+    db.block_task(conn, a.id, b.id)
+    reply = orchestrator.apply_intent(conn, Intent(action="unblock", task_id=a.id), NOW)
+    assert db.get_task(conn, a.id).blocked_by is None
+    assert reply == "Unblocked."
+
+
+def test_block_self_is_rejected():
+    conn = fresh()
+    a = db.add_task(conn, "a", "normal", None, NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="block", task_id=a.id, blocked_by=a.id), NOW
+    )
+    assert db.get_task(conn, a.id).blocked_by is None
+    assert "itself" in reply.lower()
+
+
+def test_block_dangling_id_is_rejected():
+    conn = fresh()
+    a = db.add_task(conn, "a", "normal", None, NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="block", task_id=a.id, blocked_by=999), NOW
+    )
+    assert db.get_task(conn, a.id).blocked_by is None
+    assert "find" in reply.lower()
+
+
+def test_block_cycle_is_rejected():
+    conn = fresh()
+    a = db.add_task(conn, "a", "normal", None, NOW)
+    b = db.add_task(conn, "b", "normal", None, NOW)
+    db.block_task(conn, b.id, a.id)  # b already waits on a
+    reply = orchestrator.apply_intent(
+        conn,
+        Intent(action="block", task_id=a.id, blocked_by=b.id),
+        NOW,  # a waits on b -> loop
+    )
+    assert db.get_task(conn, a.id).blocked_by is None
+    assert "loop" in reply.lower()

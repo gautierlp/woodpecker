@@ -3,10 +3,25 @@ from datetime import datetime
 
 from . import db
 from .llm import Intent
-from .models import PRIORITY_NORMAL
+from .models import PRIORITY_NORMAL, STATUS_PENDING
 from .render import render_backlog
 
 logger = logging.getLogger(__name__)
+
+
+def _would_cycle(conn, task_id: int, blocked_by: int) -> bool:
+    """True if making task_id wait on blocked_by would form a loop. Walks the
+    blocked_by chain up from the proposed blocker; a loop exists if it leads back
+    to task_id."""
+    seen: set[int] = set()
+    cursor = blocked_by
+    while cursor is not None and cursor not in seen:
+        if cursor == task_id:
+            return True
+        seen.add(cursor)
+        task = db.get_task(conn, cursor)
+        cursor = task.blocked_by if task else None
+    return False
 
 
 def apply_intent(conn, intent: Intent, now: datetime) -> str:
@@ -30,6 +45,29 @@ def apply_intent(conn, intent: Intent, now: datetime) -> str:
         task = db.drop_task(conn, intent.task_id)
         logger.info("Drop task_id=%s: %s", intent.task_id, "ok" if task else "not found")
         return "Dropped." if task else "Couldn't find that one."
+    if intent.action == "block":
+        if intent.task_id == intent.blocked_by:
+            return "A task can't block itself."
+        blocked = db.get_task(conn, intent.task_id)
+        blocker = db.get_task(conn, intent.blocked_by)
+        if (
+            blocked is None
+            or blocked.status != STATUS_PENDING
+            or blocker is None
+            or blocker.status != STATUS_PENDING
+        ):
+            logger.info("Block rejected: could not find both pending tasks")
+            return "Couldn't find those tasks."
+        if _would_cycle(conn, intent.task_id, intent.blocked_by):
+            logger.info("Block rejected: would create a cycle")
+            return "That would create a loop, so I left it alone."
+        db.block_task(conn, intent.task_id, intent.blocked_by)
+        logger.info("Blocked task_id=%s on %s", intent.task_id, intent.blocked_by)
+        return f'Noted: "{blocked.text}" waits on "{blocker.text}" first.'
+    if intent.action == "unblock":
+        task = db.unblock_task(conn, intent.task_id)
+        logger.info("Unblock task_id=%s: %s", intent.task_id, "ok" if task else "not found")
+        return "Unblocked." if task else "Couldn't find that one."
     if intent.action == "list":
         return render_backlog(db.list_all(conn), now)
     return intent.reply or "Not sure what you mean. Try rephrasing?"
