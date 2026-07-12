@@ -42,11 +42,37 @@ def test_header_singular_for_one_task():
     assert render.render_backlog([make(1, text="a")], NOW).splitlines()[0] == "📋 1 task"
 
 
-def test_lines_are_numbered_by_id_not_position():
-    # The visible number is the task's stable id, so "complete 7" / "3 blocks 7"
-    # resolve to the same task the bot acts on, regardless of sort position.
+def test_lines_are_numbered_by_display_position_not_id():
+    # The visible number is the task's position in the list, not its stable db id, so a
+    # single task shows as "1." whatever its id. The id is a hidden internal handle.
     task = make(7, text="call vet", priority=PRIORITY_IMPORTANT, deadline=date(2026, 12, 1))
-    assert task_line(task).startswith("7. ")
+    assert task_line(task).startswith("1. ")
+
+
+def test_numbers_are_sequential_regardless_of_ids():
+    # Three tasks with gappy, out-of-order ids still number 1, 2, 3 top-to-bottom.
+    tasks = [
+        make(7, text="a", deadline=TODAY),
+        make(26, text="b", deadline=TODAY),
+        make(4, text="c", deadline=TODAY),
+    ]
+    lines = render.render_backlog(tasks, NOW).splitlines()
+    numbered = [line for line in lines if line[:1].isdigit()]
+    assert numbered == ["1. a", "2. b", "3. c"]
+
+
+def test_numbers_span_groups_and_nested_children():
+    # Numbering runs continuously down the whole message: across group boundaries and
+    # onto nested children, so every visible line has a unique reference number.
+    tasks = [
+        make(10, text="today root", deadline=TODAY),
+        make(11, text="today child", deadline=TODAY, blocked_by=10),
+        make(20, text="next week", deadline=date(2026, 7, 8)),  # Wednesday
+    ]
+    lines = render.render_backlog(tasks, NOW).splitlines()
+    assert "1. today root" in lines
+    assert "   ↳ 2. today child" in lines
+    assert "3. next week (Wed)" in lines
 
 
 def test_groups_by_deadline_bucket():
@@ -160,5 +186,6 @@ def test_completed_blocker_promotes_child_to_top_level():
     dep = make(2, text="child", deadline=TODAY, blocked_by=1)
     lines = render.render_backlog([blocker, dep], NOW).splitlines()
     assert "parent" not in "\n".join(lines)  # done tasks are not listed
-    assert "2. child" in lines  # promoted: no arrow, no indent
+    # Only one task is pending, so it takes position 1 (numbering ignores the done task).
+    assert "1. child" in lines  # promoted: no arrow, no indent
     assert "   ↳" not in "\n".join(lines)

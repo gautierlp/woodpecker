@@ -83,6 +83,30 @@ def test_interpret_message_returns_parsed_intent():
     assert "taxes" in str(client.messages.calls[0])
 
 
+def test_backlog_in_prompt_maps_display_position_to_id():
+    # The user sees tasks numbered by position, not db id. The prompt must list each
+    # task as position + id + text so a reply like "edit 2" resolves to the right id.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [_task(41)], NOW, client)
+    system = client.messages.calls[0]["system"]
+    assert "1 (id=41): taxes" in system
+
+
+def test_prompt_explains_user_numbers_are_positions():
+    # Claude must be told the number the user types is a list position to translate to
+    # an id, otherwise it would treat "edit 2" as id=2.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [_task()], NOW, client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "position" in system
+
+
 def test_interpret_message_sends_history_before_current_message():
     # The follow-up bug: a bare "Yes" only resolves if Claude sees the prior turn
     # where it offered to act. History must be prepended to the messages array,

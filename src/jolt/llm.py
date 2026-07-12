@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from . import config
+from . import config, render
 from .models import DailyFocus, PRIORITY_IMPORTANT, Task
 
 logger = logging.getLogger(__name__)
@@ -94,15 +94,18 @@ _TOOL = {
 }
 
 
-def _task_lines(tasks: list[Task]) -> str:
-    pending = [t for t in tasks if t.status == "pending"]
-    if not pending:
+def _task_lines(tasks: list[Task], now: datetime) -> str:
+    # Number tasks by the same display position the user sees (see render.display_order),
+    # but also show each task's internal id so Claude can translate a positional reference
+    # ("edit 2") into the id the orchestrator and db act on.
+    ordered = render.display_order(tasks, now)
+    if not ordered:
         return "(backlog is empty)"
     return "\n".join(
-        f"- id={t.id}: {t.text}"
+        f"- {pos} (id={t.id}): {t.text}"
         + (" [important]" if t.priority == "important" else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
-        for t in pending
+        for pos, t in enumerate(ordered, 1)
     )
 
 
@@ -120,7 +123,11 @@ def interpret_message(
         "at once (for example a pasted list of tasks); call record_intent once per distinct "
         "task or action, never fold several tasks into one. When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
-        "leave it blank, since the backlog is ranked by importance. To complete or drop a task, "
+        "leave it blank, since the backlog is ranked by importance. In the backlog below each "
+        "task is listed as 'position (id=N): text'. The user only sees the position number, not "
+        "the id, so when they refer to a task by number ('complete 2', 'edit 3', '3 blocks 5'), "
+        "read it as the position, find that line, and use that task's id as task_id (and as "
+        "blocked_by). Never pass the position itself as the id. To complete or drop a task, "
         "pick the matching task_id from the current backlog. When the user says one task must "
         "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
         "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
@@ -147,7 +154,7 @@ def interpret_message(
             "answered until now, so their message is most likely a reply to it; resolve it "
             f"against this and act on the task it refers to:\n{recent_outbound}\n"
         )
-    system += "Current backlog:\n" + _task_lines(tasks)
+    system += "Current backlog:\n" + _task_lines(tasks, now)
     messages = list(history or [])
     messages.append({"role": "user", "content": message})
     logger.debug(
