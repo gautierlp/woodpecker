@@ -25,8 +25,12 @@ def select_daily_focus(tasks: list[Task], now: datetime) -> DailyFocus:
     ordered = order_backlog(tasks)
     if not ordered:
         return DailyFocus(focus=None, rescues=[])
-    focus = ordered[0]
-    rescues = [t for t in ordered[1:] if is_stale(t, now)][:2]
+    # Avoidance wins the lead spot: an important task that has gone stale is the
+    # deferral signal, so it leads even over a fresher, nearer-deadline one. Only when
+    # nothing important is being dodged does the lead fall back to the top of the order.
+    stale_important = [t for t in ordered if t.priority == PRIORITY_IMPORTANT and is_stale(t, now)]
+    focus = stale_important[0] if stale_important else ordered[0]
+    rescues = [t for t in ordered if t.id != focus.id and is_stale(t, now)][:2]
     return DailyFocus(focus=focus, rescues=rescues)
 
 

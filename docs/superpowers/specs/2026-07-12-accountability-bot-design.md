@@ -163,10 +163,11 @@ Telegram or Claude calls.
 
 From the pending tasks:
 - **Focus item ("hit this"):** avoidance wins the lead spot. If any **important** task
-  is stale, the most-avoided one (important, then oldest) leads. Only when nothing
-  important is being dodged does the lead fall back to the top of the ordinary priority
-  order (important first, nearest deadline, then oldest). A fresh important task
-  therefore leads only when no important task is being avoided.
+  is stale, the highest-ranked stale important task leads (ranked by the usual order:
+  nearest deadline, then oldest). Only when nothing important is being dodged does the
+  lead fall back to the top of the ordinary priority order (important first, nearest
+  deadline, then oldest). A fresh important task therefore leads only when no important
+  task is being avoided.
 - **Rescues:** up to 2 stale tasks not already the focus item, important-first so the
   most-avoided tasks surface before harmless old ones.
 - These feed the Claude-written focus, which also receives each surfaced task's

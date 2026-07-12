@@ -63,6 +63,24 @@ def test_select_daily_focus_picks_top_and_two_rescues():
     assert 1 not in [t.id for t in result.rescues]  # focus never doubled as a rescue
 
 
+def test_stale_important_leads_and_is_not_also_a_rescue():
+    # A fresh important task with the nearest deadline would win the ordinary priority
+    # order, but an avoided (stale) important task must take the lead instead.
+    fresh_imp = make(1, priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 13), created=NOW)
+    stale_imp = make(2, priority=PRIORITY_IMPORTANT, created=NOW - timedelta(days=5))
+    stale_normal = make(3, priority=PRIORITY_NORMAL, created=NOW - timedelta(days=6))
+    result = selection.select_daily_focus([fresh_imp, stale_imp, stale_normal], NOW)
+    assert result.focus.id == 2
+    assert 2 not in [t.id for t in result.rescues]
+
+
+def test_lead_falls_back_to_top_priority_when_no_important_is_stale():
+    fresh_imp = make(1, priority=PRIORITY_IMPORTANT, created=NOW)
+    stale_normal = make(2, priority=PRIORITY_NORMAL, created=NOW - timedelta(days=5))
+    result = selection.select_daily_focus([fresh_imp, stale_normal], NOW)
+    assert result.focus.id == 1
+
+
 def test_select_daily_focus_empty():
     result = selection.select_daily_focus([], NOW)
     assert result.focus is None
