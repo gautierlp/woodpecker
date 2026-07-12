@@ -1,10 +1,14 @@
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 from jolt import bot, db
 from jolt.llm import Intent
 from jolt.memory import ConversationMemory
+
+TZ = ZoneInfo("Europe/Paris")
 
 
 def fresh():
@@ -35,7 +39,7 @@ def test_handle_message_adds_task_and_replies(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
             Intent(action="add", text="call vet")
         ],
     )
@@ -52,7 +56,7 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
             Intent(action="add", text="cancel gym"),
             Intent(action="add", text="file taxes"),
             Intent(action="add", text="file expenses"),
@@ -76,7 +80,7 @@ def test_handle_message_passes_prior_history_to_llm(monkeypatch):
     memory.add(42, "is 32 blocked by 31?", "Not currently. Want me to set that up?")
     seen = {}
 
-    def capture(msg, tasks, now, client, history=None, recent_outbound=None):
+    def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):
         seen["history"] = history
         return [Intent(action="answer", reply="ok")]
 
@@ -97,7 +101,7 @@ def test_handle_message_records_turn_in_memory(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
             Intent(action="answer", reply="Want me to set that up?")
         ],
     )
@@ -117,7 +121,7 @@ def test_handle_message_passes_pending_outbound_to_llm(monkeypatch):
     memory.note_outbound(42, "Still the taxes. Two minutes. Go.")
     seen = {}
 
-    def capture(msg, tasks, now, client, history=None, recent_outbound=None):
+    def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):
         seen["outbound"] = recent_outbound
         return [Intent(action="answer", reply="ok")]
 
@@ -137,7 +141,7 @@ def test_handle_message_clears_outbound_after_reply(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
             Intent(action="answer", reply="ok")
         ],
     )
@@ -145,6 +149,45 @@ def test_handle_message_clears_outbound_after_reply(monkeypatch):
     context = make_context(conn, None, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert memory.get_outbound(42) is None
+
+
+def test_handle_message_snapshots_the_shown_list_for_next_message(monkeypatch):
+    # After showing the list, the exact order shown is remembered, so the next message's
+    # numbers resolve against what the user is looking at, not a re-derived live order.
+    conn = fresh()
+    memory = ConversationMemory()
+    t1 = db.add_task(conn, "first", "normal", None, datetime(2026, 7, 1, tzinfo=TZ))
+    t2 = db.add_task(conn, "second", "normal", None, datetime(2026, 7, 2, tzinfo=TZ))
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
+            Intent(action="list")
+        ],
+    )
+    update = make_update("current tasks")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert memory.get_display(42) == [t1.id, t2.id]
+
+
+def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):
+    # The snapshot from the last list must reach interpret_message, so a number resolves
+    # against the list the user saw rather than the current order.
+    conn = fresh()
+    memory = ConversationMemory()
+    memory.note_display(42, [7, 3, 9])
+    seen = {}
+
+    def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):
+        seen["display_ids"] = display_ids
+        return [Intent(action="answer", reply="ok")]
+
+    monkeypatch.setattr(bot.llm, "interpret_message", capture)
+    update = make_update("done 2")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert seen["display_ids"] == [7, 3, 9]
 
 
 def test_recording_send_notes_outbound_then_forwards():

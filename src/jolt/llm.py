@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from . import config, render
-from .models import DailyFocus, PRIORITY_IMPORTANT, Task
+from .models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
 
 logger = logging.getLogger(__name__)
 
@@ -96,30 +96,52 @@ _TOOL = {
 }
 
 
-def _task_lines(tasks: list[Task], now: datetime) -> str:
-    # Show Claude the exact position numbers the user sees (see render.display_order) and
-    # nothing else. The db id is deliberately hidden: exposing both let Claude sometimes
-    # emit the position where an id was expected. Claude echoes a position; code below
-    # translates it to the id.
-    ordered = render.display_order(tasks, now)
-    if not ordered:
+def _numbered(display_ids: list[int] | None, tasks: list[Task], now: datetime) -> list[tuple]:
+    # The (position, task) pairs the user is looking at. When we have a snapshot of the
+    # last list shown (display_ids), number by that exact order so a reference resolves to
+    # what the user saw, not a live order that may have shifted since. A snapshot task
+    # that is no longer pending drops out, but the survivors keep their original numbers
+    # (each line carries its number explicitly). With no snapshot, fall back to the live
+    # display order.
+    if display_ids is None:
+        return list(enumerate(render.display_order(tasks, now), 1))
+    by_id = {t.id: t for t in tasks}
+    return [
+        (pos, by_id[tid])
+        for pos, tid in enumerate(display_ids, 1)
+        if tid in by_id and by_id[tid].status == STATUS_PENDING
+    ]
+
+
+def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime) -> str:
+    # Show Claude the exact position numbers the user sees and nothing else. The db id is
+    # deliberately hidden: exposing both let Claude sometimes emit the position where an
+    # id was expected. Claude echoes a position; code below translates it to the id.
+    numbered = _numbered(display_ids, tasks, now)
+    if not numbered:
         return "(backlog is empty)"
     return "\n".join(
         f"- {pos}: {t.text}"
         + (" [important]" if t.priority == "important" else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
-        for pos, t in enumerate(ordered, 1)
+        for pos, t in numbered
     )
 
 
-def _resolve_positions(intents: list[Intent], tasks: list[Task], now: datetime) -> list[Intent]:
+def _resolve_positions(
+    intents: list[Intent], display_ids: list[int] | None, tasks: list[Task], now: datetime
+) -> list[Intent]:
     # Claude refers to tasks by the position numbers it was shown; the orchestrator and db
     # act on stable ids. Translate every position back to its id here, in deterministic
     # code, so a wrong translation can't happen (the earlier bug: Claude emitting a
-    # position as if it were an id). A number past the end of the list maps to None, which
-    # the orchestrator reports as "couldn't find" rather than hitting an unrelated id.
-    ordered = render.display_order(tasks, now)
-    pos_to_id = {pos: t.id for pos, t in enumerate(ordered, 1)}
+    # position as if it were an id). Positions are read against the same snapshot the
+    # prompt used, so numbers resolve to the list the user saw. A number with no matching
+    # position maps to None, which the orchestrator reports as "couldn't find" rather than
+    # hitting an unrelated task.
+    if display_ids is None:
+        pos_to_id = {pos: t.id for pos, t in enumerate(render.display_order(tasks, now), 1)}
+    else:
+        pos_to_id = {pos: tid for pos, tid in enumerate(display_ids, 1)}
     resolved = []
     for intent in intents:
         changes = {}
@@ -138,6 +160,7 @@ def interpret_message(
     client,
     history: list[dict] | None = None,
     recent_outbound: str | None = None,
+    display_ids: list[int] | None = None,
 ) -> list[Intent]:
     system = (
         "You are Jolt, a personal accountability bot. Read the user's message and record "
@@ -176,7 +199,7 @@ def interpret_message(
             "answered until now, so their message is most likely a reply to it; resolve it "
             f"against this and act on the task it refers to:\n{recent_outbound}\n"
         )
-    system += "Current backlog:\n" + _task_lines(tasks, now)
+    system += "Current backlog:\n" + _task_lines(display_ids, tasks, now)
     messages = list(history or [])
     messages.append({"role": "user", "content": message})
     logger.debug(
@@ -203,7 +226,7 @@ def interpret_message(
     if not intents:
         logger.warning("Claude returned no tool_use block; falling back to clarification reply")
         return [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
-    intents = _resolve_positions(intents, tasks, now)
+    intents = _resolve_positions(intents, display_ids, tasks, now)
     return intents
 
 

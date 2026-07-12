@@ -89,3 +89,29 @@ def test_outbound_is_per_chat():
     mem = ConversationMemory()
     mem.note_outbound(1, "nag one")
     assert mem.get_outbound(2) is None
+
+
+def test_get_display_defaults_to_none():
+    mem = ConversationMemory()
+    assert mem.get_display(42) is None
+
+
+def test_note_display_then_get_returns_the_shown_order():
+    # The snapshot of the last list shown: the task ids in the exact order the user saw,
+    # so a later "complete 2" resolves to the second task on that list.
+    mem = ConversationMemory()
+    mem.note_display(42, [45, 46, 47])
+    assert mem.get_display(42) == [45, 46, 47]
+
+
+def test_note_display_keeps_only_the_latest_list():
+    mem = ConversationMemory()
+    mem.note_display(42, [1, 2, 3])
+    mem.note_display(42, [9, 8])
+    assert mem.get_display(42) == [9, 8]
+
+
+def test_display_snapshot_is_per_chat():
+    mem = ConversationMemory()
+    mem.note_display(1, [1, 2])
+    assert mem.get_display(2) is None

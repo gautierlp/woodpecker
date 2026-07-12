@@ -1,6 +1,6 @@
 import logging
 
-from . import config, db, llm, orchestrator
+from . import config, db, llm, orchestrator, render
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +46,18 @@ async def handle_message(update, context) -> None:
     tasks = db.list_all(conn)
     history = memory.get(chat_id)
     outbound = memory.get_outbound(chat_id)
+    display_ids = memory.get_display(chat_id)
     intents = llm.interpret_message(
-        text, tasks, now, client, history=history, recent_outbound=outbound
+        text, tasks, now, client, history=history, recent_outbound=outbound, display_ids=display_ids
     )
     logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
     reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
     logger.debug("Reply body: %s", reply)
+    # If we just printed the backlog, remember the exact order shown, so the numbers in
+    # the next message resolve against this list rather than a later, shifted order.
+    if any(intent.action == "list" for intent in intents):
+        shown = render.display_order(db.list_all(conn), now)
+        memory.note_display(chat_id, [t.id for t in shown])
     memory.add(chat_id, text, reply)
     # The pending nag has now been answered (or superseded by real conversation), so
     # it must not colour the next, unrelated message.

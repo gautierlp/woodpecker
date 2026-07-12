@@ -11,6 +11,12 @@ class ConversationMemory:
         # preceding user turn, and the Claude API needs the message list to start with
         # one; it rides in the system prompt instead so a reply like "done" resolves.
         self._outbound: dict[int, str] = {}
+        # The task ids, in order, of the last backlog list shown to each chat. A number
+        # the user types ("complete 2") is a position in this list, so references resolve
+        # against what they are looking at, not a re-derived live order that may have
+        # shifted since. Only a fresh list overwrites it. Not persisted: a restart falls
+        # back to live ordering until the next list is shown.
+        self._display: dict[int, list[int]] = {}
 
     def get(self, chat_id: int) -> list[dict[str, str]]:
         return list(self._history.get(chat_id, []))
@@ -34,3 +40,10 @@ class ConversationMemory:
 
     def clear_outbound(self, chat_id: int) -> None:
         self._outbound.pop(chat_id, None)
+
+    def note_display(self, chat_id: int, task_ids: list[int]) -> None:
+        self._display[chat_id] = list(task_ids)
+
+    def get_display(self, chat_id: int) -> list[int] | None:
+        ids = self._display.get(chat_id)
+        return list(ids) if ids is not None else None

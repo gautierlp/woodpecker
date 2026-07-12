@@ -136,6 +136,57 @@ def test_interpret_message_resolves_complete_position_to_id():
     assert intents[0].task_id == 45
 
 
+def test_interpret_resolves_numbers_against_shown_snapshot_not_live_order():
+    # The stale-position bug: after tasks move, the live order differs from the list the
+    # user is looking at. A number must resolve against the snapshot of the last list
+    # shown. Live order here is [46, 45] (pos 2 -> 45), but the snapshot showed [45, 46]
+    # (pos 2 -> 46), so "complete 2" must hit 46.
+    tasks = [_ordered_task(46, 1), _ordered_task(45, 2)]
+    complete = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "complete", "task_id": 2}
+    )
+    client = FakeClient(SimpleNamespace(content=[complete]))
+    intents = llm.interpret_message("done 2", tasks, NOW, client, display_ids=[45, 46])
+    assert intents[0].task_id == 46
+
+
+def test_prompt_numbers_tasks_by_snapshot_order():
+    # Claude must see the same numbering the user saw, so a text reference resolves to the
+    # right number. The snapshot order [45, 46] wins over the live order.
+    tasks = [_ordered_task(46, 1), _ordered_task(45, 2)]
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", tasks, NOW, client, display_ids=[45, 46])
+    system = client.messages.calls[0]["system"]
+    assert "1: task 45" in system
+    assert "2: task 46" in system
+
+
+def test_prompt_drops_snapshot_task_that_is_no_longer_pending():
+    # A task completed since the list was shown falls out of the numbered list, but the
+    # surviving lines keep their original numbers (each carries an explicit number).
+    done = Task(
+        id=45,
+        text="task 45",
+        priority=PRIORITY_NORMAL,
+        deadline=None,
+        created_at=datetime(2026, 7, 1, tzinfo=TZ),
+        status="done",
+        last_nagged_at=None,
+        completed_at=NOW,
+    )
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [done, _ordered_task(46, 2)], NOW, client, display_ids=[45, 46])
+    system = client.messages.calls[0]["system"]
+    assert "1: task 45" not in system
+    assert "2: task 46" in system
+
+
 def test_interpret_message_out_of_range_position_resolves_to_not_found():
     # A number past the end of the list must fail cleanly (id becomes None -> "couldn't
     # find") rather than silently landing on some unrelated task that happens to have
