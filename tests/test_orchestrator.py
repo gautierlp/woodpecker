@@ -115,3 +115,48 @@ def test_block_cycle_is_rejected():
     )
     assert db.get_task(conn, a.id).blocked_by is None
     assert "loop" in reply.lower()
+
+
+def test_edit_intent_changes_deadline_and_confirms():
+    conn = fresh()
+    t = db.add_task(conn, "accounts", "important", date(2026, 7, 20), NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="edit", task_id=t.id, deadline=date(2026, 7, 12)), NOW
+    )
+    assert db.get_task(conn, t.id).deadline == date(2026, 7, 12)
+    assert "2026-07-12" in reply
+
+
+def test_edit_intent_clears_deadline():
+    conn = fresh()
+    t = db.add_task(conn, "accounts", "important", date(2026, 7, 20), NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="edit", task_id=t.id, clear_deadline=True), NOW
+    )
+    assert db.get_task(conn, t.id).deadline is None
+    assert "removed" in reply.lower()
+
+
+def test_edit_intent_changes_priority():
+    conn = fresh()
+    t = db.add_task(conn, "x", "normal", None, NOW)
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="edit", task_id=t.id, priority="important"), NOW
+    )
+    assert db.get_task(conn, t.id).priority == "important"
+    assert reply == "Updated."
+
+
+def test_edit_intent_empty_change_is_rejected():
+    conn = fresh()
+    t = db.add_task(conn, "x", "normal", None, NOW)
+    reply = orchestrator.apply_intent(conn, Intent(action="edit", task_id=t.id), NOW)
+    assert reply == "Nothing to change."
+
+
+def test_edit_intent_unknown_id_is_graceful():
+    conn = fresh()
+    reply = orchestrator.apply_intent(
+        conn, Intent(action="edit", task_id=999, deadline=date(2026, 7, 12)), NOW
+    )
+    assert reply == "Couldn't find that one."

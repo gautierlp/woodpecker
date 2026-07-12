@@ -45,6 +45,37 @@ def apply_intent(conn, intent: Intent, now: datetime) -> str:
         task = db.drop_task(conn, intent.task_id)
         logger.info("Drop task_id=%s: %s", intent.task_id, "ok" if task else "not found")
         return "Dropped." if task else "Couldn't find that one."
+    if intent.action == "edit":
+        if (
+            intent.text is None
+            and intent.priority is None
+            and intent.deadline is None
+            and not intent.clear_deadline
+        ):
+            return "Nothing to change."
+        if intent.deadline is not None:
+            task = db.update_task(
+                conn,
+                intent.task_id,
+                text=intent.text,
+                priority=intent.priority,
+                deadline=intent.deadline,
+            )
+        elif intent.clear_deadline:
+            task = db.update_task(
+                conn, intent.task_id, text=intent.text, priority=intent.priority, deadline=None
+            )
+        else:
+            task = db.update_task(conn, intent.task_id, text=intent.text, priority=intent.priority)
+        logger.info("Edit task_id=%s: %s", intent.task_id, "ok" if task else "not found")
+        if task is None:
+            return "Couldn't find that one."
+        ack = "Updated."
+        if intent.deadline is not None:
+            ack += f" Due {task.deadline.isoformat()}."
+        elif intent.clear_deadline:
+            ack += " Due date removed."
+        return ack
     if intent.action == "block":
         if intent.task_id == intent.blocked_by:
             return "A task can't block itself."
