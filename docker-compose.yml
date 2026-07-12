@@ -1,0 +1,10 @@
+services:
+  jolt:
+    build: .
+    container_name: jolt
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      JOLT_DB_PATH: /app/data/jolt.db
+    volumes:
+      - ./data:/app/data
