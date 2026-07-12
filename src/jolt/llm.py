@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from . import config, render
@@ -74,11 +74,13 @@ _TOOL = {
             },
             "task_id": {
                 "type": "integer",
-                "description": "The id of the existing task, for complete/drop/edit.",
+                "description": "The backlog number shown for the existing task, for "
+                "complete/drop/edit/block.",
             },
             "blocked_by": {
                 "type": "integer",
-                "description": "For action=block: the id of the prerequisite task that must be finished first.",
+                "description": "For action=block: the backlog number of the prerequisite task "
+                "that must be finished first.",
             },
             "reply": {
                 "type": "string",
@@ -95,18 +97,38 @@ _TOOL = {
 
 
 def _task_lines(tasks: list[Task], now: datetime) -> str:
-    # Number tasks by the same display position the user sees (see render.display_order),
-    # but also show each task's internal id so Claude can translate a positional reference
-    # ("edit 2") into the id the orchestrator and db act on.
+    # Show Claude the exact position numbers the user sees (see render.display_order) and
+    # nothing else. The db id is deliberately hidden: exposing both let Claude sometimes
+    # emit the position where an id was expected. Claude echoes a position; code below
+    # translates it to the id.
     ordered = render.display_order(tasks, now)
     if not ordered:
         return "(backlog is empty)"
     return "\n".join(
-        f"- {pos} (id={t.id}): {t.text}"
+        f"- {pos}: {t.text}"
         + (" [important]" if t.priority == "important" else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
         for pos, t in enumerate(ordered, 1)
     )
+
+
+def _resolve_positions(intents: list[Intent], tasks: list[Task], now: datetime) -> list[Intent]:
+    # Claude refers to tasks by the position numbers it was shown; the orchestrator and db
+    # act on stable ids. Translate every position back to its id here, in deterministic
+    # code, so a wrong translation can't happen (the earlier bug: Claude emitting a
+    # position as if it were an id). A number past the end of the list maps to None, which
+    # the orchestrator reports as "couldn't find" rather than hitting an unrelated id.
+    ordered = render.display_order(tasks, now)
+    pos_to_id = {pos: t.id for pos, t in enumerate(ordered, 1)}
+    resolved = []
+    for intent in intents:
+        changes = {}
+        if intent.task_id is not None:
+            changes["task_id"] = pos_to_id.get(intent.task_id)
+        if intent.blocked_by is not None:
+            changes["blocked_by"] = pos_to_id.get(intent.blocked_by)
+        resolved.append(replace(intent, **changes) if changes else intent)
+    return resolved
 
 
 def interpret_message(
@@ -124,14 +146,14 @@ def interpret_message(
         "task or action, never fold several tasks into one. When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. In the backlog below each "
-        "task is listed as 'position (id=N): text'. The user only sees the position number, not "
-        "the id, so when they refer to a task by number ('complete 2', 'edit 3', '3 blocks 5'), "
-        "read it as the position, find that line, and use that task's id as task_id (and as "
-        "blocked_by). Never pass the position itself as the id. To complete or drop a task, "
-        "pick the matching task_id from the current backlog. When the user says one task must "
+        "task is listed as 'number: text', where the number is what the user sees. To act on a "
+        "task (complete, drop, edit, block), pass that exact number as task_id (and as "
+        "blocked_by for a prerequisite): the user's '2' in 'complete 2' or '34 blocks 35' is "
+        "that number. When the user names a task by its text instead of a number, find the "
+        "matching line and use its number. When the user says one task must "
         "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
         "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
-        "the prerequisite task's id; emit one block call per blocked task. To lift a dependency, use "
+        "the prerequisite task's number; emit one block call per blocked task. To lift a dependency, use "
         "action=unblock with the task_id. "
         "To change an existing task rather than add a new one, use action=edit with its task_id "
         "and only the fields that change: a new deadline, a new priority (normal/important), or "
@@ -158,7 +180,7 @@ def interpret_message(
     messages = list(history or [])
     messages.append({"role": "user", "content": message})
     logger.debug(
-        "interpret_message: %d pending task(s), %d prior turn(s) in context",
+        "interpret_message: %d task(s) in store, %d prior turn(s) in context",
         len(tasks),
         len(messages) - 1,
     )
@@ -181,6 +203,7 @@ def interpret_message(
     if not intents:
         logger.warning("Claude returned no tool_use block; falling back to clarification reply")
         return [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
+    intents = _resolve_positions(intents, tasks, now)
     return intents
 
 

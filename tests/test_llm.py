@@ -68,6 +68,21 @@ def _task(id=1):
     )
 
 
+def _ordered_task(id, day):
+    # A no-deadline task whose age (day-of-month) fixes its position: ascending day ->
+    # ascending position, so a test can pin "position N" to a chosen id regardless of id.
+    return Task(
+        id=id,
+        text=f"task {id}",
+        priority=PRIORITY_NORMAL,
+        deadline=None,
+        created_at=datetime(2026, 7, day, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+    )
+
+
 NOW = datetime(2026, 7, 12, 15, tzinfo=TZ)
 
 
@@ -83,28 +98,55 @@ def test_interpret_message_returns_parsed_intent():
     assert "taxes" in str(client.messages.calls[0])
 
 
-def test_backlog_in_prompt_maps_display_position_to_id():
-    # The user sees tasks numbered by position, not db id. The prompt must list each
-    # task as position + id + text so a reply like "edit 2" resolves to the right id.
+def test_backlog_in_prompt_shows_positions_without_leaking_ids():
+    # Claude sees only the position numbers the user sees, never the db id: exposing the
+    # id was what let it emit a position where an id was expected (or vice versa).
     tool_block = SimpleNamespace(
         type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
     )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     llm.interpret_message("x", [_task(41)], NOW, client)
     system = client.messages.calls[0]["system"]
-    assert "1 (id=41): taxes" in system
+    assert "1: taxes" in system
+    assert "id=41" not in system
 
 
-def test_prompt_explains_user_numbers_are_positions():
-    # Claude must be told the number the user types is a list position to translate to
-    # an id, otherwise it would treat "edit 2" as id=2.
-    tool_block = SimpleNamespace(
-        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+def test_interpret_message_resolves_block_positions_to_ids():
+    # The heart of the fix: the LLM outputs the numbers the user typed (list positions);
+    # deterministic code maps them to the real db ids the orchestrator acts on. Here the
+    # backlog is three tasks with gappy ids, so positions 2/3 -> ids 45/46.
+    tasks = [_ordered_task(7, 1), _ordered_task(45, 2), _ordered_task(46, 3)]
+    block = SimpleNamespace(
+        type="tool_use",
+        name="record_intent",
+        input={"action": "block", "task_id": 3, "blocked_by": 2},
     )
-    client = FakeClient(SimpleNamespace(content=[tool_block]))
-    llm.interpret_message("x", [_task()], NOW, client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "position" in system
+    client = FakeClient(SimpleNamespace(content=[block]))
+    intents = llm.interpret_message("3 blocked by 2", tasks, NOW, client)
+    assert (intents[0].task_id, intents[0].blocked_by) == (46, 45)
+
+
+def test_interpret_message_resolves_complete_position_to_id():
+    tasks = [_ordered_task(7, 1), _ordered_task(45, 2)]
+    complete = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "complete", "task_id": 2}
+    )
+    client = FakeClient(SimpleNamespace(content=[complete]))
+    intents = llm.interpret_message("done 2", tasks, NOW, client)
+    assert intents[0].task_id == 45
+
+
+def test_interpret_message_out_of_range_position_resolves_to_not_found():
+    # A number past the end of the list must fail cleanly (id becomes None -> "couldn't
+    # find") rather than silently landing on some unrelated task that happens to have
+    # that id.
+    tasks = [_ordered_task(7, 1)]
+    complete = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "complete", "task_id": 9}
+    )
+    client = FakeClient(SimpleNamespace(content=[complete]))
+    intents = llm.interpret_message("done 9", tasks, NOW, client)
+    assert intents[0].task_id is None
 
 
 def test_interpret_message_sends_history_before_current_message():
@@ -332,7 +374,9 @@ def test_prompt_mentions_dependencies():
 
 
 def test_interpret_message_maps_dependency_to_two_block_intents():
-    # "1 and 2 need 3 first" must become one block intent per blocked task.
+    # "1 and 2 need 3 first" must become one block intent per blocked task, each with its
+    # positions resolved to ids. Positions 1/2/3 -> ids 11/12/13 here.
+    tasks = [_ordered_task(11, 1), _ordered_task(12, 2), _ordered_task(13, 3)]
     blocks = [
         SimpleNamespace(
             type="tool_use",
@@ -346,10 +390,10 @@ def test_interpret_message_maps_dependency_to_two_block_intents():
         ),
     ]
     client = FakeClient(SimpleNamespace(content=blocks))
-    intents = llm.interpret_message("1 and 2 need 3 first", [_task()], NOW, client)
+    intents = llm.interpret_message("1 and 2 need 3 first", tasks, NOW, client)
     assert [(i.action, i.task_id, i.blocked_by) for i in intents] == [
-        ("block", 1, 3),
-        ("block", 2, 3),
+        ("block", 11, 13),
+        ("block", 12, 13),
     ]
 
 
