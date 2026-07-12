@@ -35,7 +35,9 @@ def test_handle_message_adds_task_and_replies(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None: [Intent(action="add", text="call vet")],
+        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+            Intent(action="add", text="call vet")
+        ],
     )
     update = make_update("remind me to call vet")
     context = make_context(conn, None)
@@ -50,7 +52,7 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
             Intent(action="add", text="cancel gym"),
             Intent(action="add", text="file taxes"),
             Intent(action="add", text="file expenses"),
@@ -74,7 +76,7 @@ def test_handle_message_passes_prior_history_to_llm(monkeypatch):
     memory.add(42, "is 32 blocked by 31?", "Not currently. Want me to set that up?")
     seen = {}
 
-    def capture(msg, tasks, now, client, history=None):
+    def capture(msg, tasks, now, client, history=None, recent_outbound=None):
         seen["history"] = history
         return [Intent(action="answer", reply="ok")]
 
@@ -95,7 +97,7 @@ def test_handle_message_records_turn_in_memory(monkeypatch):
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
-        lambda msg, tasks, now, client, history=None: [
+        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
             Intent(action="answer", reply="Want me to set that up?")
         ],
     )
@@ -106,6 +108,54 @@ def test_handle_message_records_turn_in_memory(monkeypatch):
         {"role": "user", "content": "is 32 blocked by 31?"},
         {"role": "assistant", "content": "Want me to set that up?"},
     ]
+
+
+def test_handle_message_passes_pending_outbound_to_llm(monkeypatch):
+    # A reply to a nag must carry the nag into interpret_message as context.
+    conn = fresh()
+    memory = ConversationMemory()
+    memory.note_outbound(42, "Still the taxes. Two minutes. Go.")
+    seen = {}
+
+    def capture(msg, tasks, now, client, history=None, recent_outbound=None):
+        seen["outbound"] = recent_outbound
+        return [Intent(action="answer", reply="ok")]
+
+    monkeypatch.setattr(bot.llm, "interpret_message", capture)
+    update = make_update("done")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert seen["outbound"] == "Still the taxes. Two minutes. Go."
+
+
+def test_handle_message_clears_outbound_after_reply(monkeypatch):
+    # Once the user has engaged, the pending nag is spent and must not haunt the
+    # next unrelated message.
+    conn = fresh()
+    memory = ConversationMemory()
+    memory.note_outbound(42, "Still the taxes. Two minutes. Go.")
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client, history=None, recent_outbound=None: [
+            Intent(action="answer", reply="ok")
+        ],
+    )
+    update = make_update("done")
+    context = make_context(conn, None, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    assert memory.get_outbound(42) is None
+
+
+def test_recording_send_notes_outbound_then_forwards():
+    # Wraps the raw send so every scheduler message (nag, focus) is remembered as
+    # pending outbound and still goes out unchanged.
+    memory = ConversationMemory()
+    sent = []
+    send = bot.make_recording_send(sent.append, memory, chat_id=42)
+    send("Still the taxes. Two minutes. Go.")
+    assert sent == ["Still the taxes. Two minutes. Go."]
+    assert memory.get_outbound(42) == "Still the taxes. Two minutes. Go."
 
 
 def test_handle_message_ignores_foreign_chat(monkeypatch):

@@ -6,6 +6,11 @@ class ConversationMemory:
     def __init__(self, max_pairs: int = 10):
         self._history: dict[int, list[dict[str, str]]] = {}
         self._max_pairs = max_pairs
+        # The latest message Jolt sent on its own (a nag or the daily focus) that the
+        # user has not answered yet. Kept apart from _history because it has no
+        # preceding user turn, and the Claude API needs the message list to start with
+        # one; it rides in the system prompt instead so a reply like "done" resolves.
+        self._outbound: dict[int, str] = {}
 
     def get(self, chat_id: int) -> list[dict[str, str]]:
         return list(self._history.get(chat_id, []))
@@ -20,3 +25,12 @@ class ConversationMemory:
 
     def clear(self, chat_id: int) -> None:
         self._history.pop(chat_id, None)
+
+    def note_outbound(self, chat_id: int, message: str) -> None:
+        self._outbound[chat_id] = message
+
+    def get_outbound(self, chat_id: int) -> str | None:
+        return self._outbound.get(chat_id)
+
+    def clear_outbound(self, chat_id: int) -> None:
+        self._outbound.pop(chat_id, None)

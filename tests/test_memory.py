@@ -57,3 +57,35 @@ def test_clear_forgets_a_chat():
     mem.add(42, "u1", "a1")
     mem.clear(42)
     assert mem.get(42) == []
+
+
+def test_get_outbound_defaults_to_none():
+    mem = ConversationMemory()
+    assert mem.get_outbound(42) is None
+
+
+def test_note_outbound_then_get_returns_it():
+    mem = ConversationMemory()
+    mem.note_outbound(42, "Still the taxes. Two minutes. Go.")
+    assert mem.get_outbound(42) == "Still the taxes. Two minutes. Go."
+
+
+def test_note_outbound_keeps_only_the_latest():
+    # A later nag supersedes an earlier one; only the most recent matters for a reply.
+    mem = ConversationMemory()
+    mem.note_outbound(42, "morning focus")
+    mem.note_outbound(42, "midday nag")
+    assert mem.get_outbound(42) == "midday nag"
+
+
+def test_clear_outbound_forgets_pending_nag():
+    mem = ConversationMemory()
+    mem.note_outbound(42, "midday nag")
+    mem.clear_outbound(42)
+    assert mem.get_outbound(42) is None
+
+
+def test_outbound_is_per_chat():
+    mem = ConversationMemory()
+    mem.note_outbound(1, "nag one")
+    assert mem.get_outbound(2) is None

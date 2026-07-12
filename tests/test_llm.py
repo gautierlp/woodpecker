@@ -125,6 +125,30 @@ def test_prompt_instructs_resolving_followups_from_history():
     assert "follow-up" in system or "earlier" in system or "previous" in system
 
 
+def test_prompt_includes_pending_outbound_nag():
+    # A reply to a nag ("done") only resolves if Claude sees the nag it is replying
+    # to. The nag has no user turn before it, so it rides in the system prompt.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "complete", "task_id": 1}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message(
+        "done", [_task()], NOW, client, recent_outbound="Still the taxes. Two minutes. Go."
+    )
+    system = client.messages.calls[0]["system"]
+    assert "Still the taxes. Two minutes. Go." in system
+
+
+def test_prompt_omits_outbound_section_when_none():
+    # No pending nag -> no dangling "you recently sent" line in the prompt.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("x", [], NOW, client)
+    assert "recently sent" not in client.messages.calls[0]["system"].lower()
+
+
 def test_interpret_message_returns_every_task_in_a_multi_task_message():
     # A single message can hold several tasks (a pasted list). Each must come back as
     # its own intent; the old code stopped after the first tool_use block and dropped

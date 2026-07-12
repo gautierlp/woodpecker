@@ -11,6 +11,18 @@ WELCOME = (
 )
 
 
+def make_recording_send(send, memory, chat_id):
+    """Wrap the raw send so every message Jolt initiates (nags, daily focus) is
+    remembered as the chat's pending outbound before going out. That lets a later
+    reply like "done" be resolved against the nag it answers."""
+
+    def recording_send(text):
+        memory.note_outbound(chat_id, text)
+        send(text)
+
+    return recording_send
+
+
 async def handle_start(update, context) -> None:
     if update.effective_chat.id != context.bot_data["chat_id"]:
         logger.warning("Ignoring /start from unauthorized chat %s", update.effective_chat.id)
@@ -33,11 +45,17 @@ async def handle_message(update, context) -> None:
     logger.debug("Inbound message body: %s", text)
     tasks = db.list_all(conn)
     history = memory.get(chat_id)
-    intents = llm.interpret_message(text, tasks, now, client, history=history)
+    outbound = memory.get_outbound(chat_id)
+    intents = llm.interpret_message(
+        text, tasks, now, client, history=history, recent_outbound=outbound
+    )
     logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
     reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
     logger.debug("Reply body: %s", reply)
     memory.add(chat_id, text, reply)
+    # The pending nag has now been answered (or superseded by real conversation), so
+    # it must not colour the next, unrelated message.
+    memory.clear_outbound(chat_id)
     await update.message.reply_text(reply)
 
 

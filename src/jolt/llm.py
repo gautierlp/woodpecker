@@ -112,6 +112,7 @@ def interpret_message(
     now: datetime,
     client,
     history: list[dict] | None = None,
+    recent_outbound: str | None = None,
 ) -> list[Intent]:
     system = (
         "You are Jolt, a personal accountability bot. Read the user's message and record "
@@ -139,8 +140,14 @@ def interpret_message(
         "write in any language, but always store the task text in English (translate it if needed). "
         f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
-        "Current backlog:\n" + _task_lines(tasks)
     )
+    if recent_outbound:
+        system += (
+            "You recently sent the user this message on your own, which they have not "
+            "answered until now, so their message is most likely a reply to it; resolve it "
+            f"against this and act on the task it refers to:\n{recent_outbound}\n"
+        )
+    system += "Current backlog:\n" + _task_lines(tasks)
     messages = list(history or [])
     messages.append({"role": "user", "content": message})
     logger.debug(
