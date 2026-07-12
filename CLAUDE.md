@@ -1,6 +1,6 @@
-# Accountability Bot
+# Jolt
 
-Telegram bot that fights task avoidance. Holds a personal backlog, nudges toward one
+Telegram bot (working name: **Jolt**) that fights task avoidance. Holds a personal backlog, nudges toward one
 focused thing each day, and gets pointedly insistent about tasks that have been quietly
 postponed. Plain-language interface powered by Claude.
 
