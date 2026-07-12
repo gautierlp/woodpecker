@@ -25,13 +25,31 @@ def make_context(conn, intent, chat_id=42):
 def test_handle_message_adds_task_and_replies(monkeypatch):
     conn = fresh()
     monkeypatch.setattr(bot.llm, "interpret_message",
-                        lambda msg, tasks, now, client: Intent(action="add", text="call vet"))
+                        lambda msg, tasks, now, client: [Intent(action="add", text="call vet")])
     update = make_update("remind me to call vet")
     context = make_context(conn, None)
     asyncio.run(bot.handle_message(update, context))
     update.message.reply_text.assert_awaited_once()
     assert "call vet" in update.message.reply_text.call_args.args[0]
     assert len(db.list_pending(conn)) == 1
+
+
+def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
+    conn = fresh()
+    monkeypatch.setattr(bot.llm, "interpret_message",
+                        lambda msg, tasks, now, client: [
+                            Intent(action="add", text="cancel gym"),
+                            Intent(action="add", text="file taxes"),
+                            Intent(action="add", text="file expenses"),
+                        ])
+    update = make_update("(three tasks at once)")
+    context = make_context(conn, None)
+    asyncio.run(bot.handle_message(update, context))
+    assert len(db.list_pending(conn)) == 3
+    reply = update.message.reply_text.call_args.args[0]
+    assert "cancel gym" in reply
+    assert "file taxes" in reply
+    assert "file expenses" in reply
 
 
 def test_handle_message_ignores_foreign_chat(monkeypatch):

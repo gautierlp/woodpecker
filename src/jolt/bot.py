@@ -25,8 +25,8 @@ async def handle_message(update, context) -> None:
     client = context.bot_data["client"]
     now = config.now_paris()
     tasks = db.list_all(conn)
-    intent = llm.interpret_message(update.message.text, tasks, now, client)
-    reply = orchestrator.apply_intent(conn, intent, now)
+    intents = llm.interpret_message(update.message.text, tasks, now, client)
+    reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
     await update.message.reply_text(reply)
 
 

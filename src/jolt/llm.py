@@ -66,10 +66,12 @@ def _task_lines(tasks: list[Task]) -> str:
     )
 
 
-def interpret_message(message: str, tasks: list[Task], now: datetime, client) -> Intent:
+def interpret_message(message: str, tasks: list[Task], now: datetime, client) -> list[Intent]:
     system = (
         "You are Jolt, a personal accountability bot. Read the user's message and record "
-        "what it means by calling record_intent exactly once. When adding a task, judge its "
+        "what it means by calling record_intent. A single message can contain several things "
+        "at once (for example a pasted list of tasks); call record_intent once per distinct "
+        "task or action, never fold several tasks into one. When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. To complete or drop a task, "
         "pick the matching task_id from the current backlog. For a question or a blocker "
@@ -82,16 +84,20 @@ def interpret_message(message: str, tasks: list[Task], now: datetime, client) ->
     )
     response = client.messages.create(
         model=config.MODEL,
-        max_tokens=400,
+        max_tokens=1000,
         system=system,
         tools=[_TOOL],
-        tool_choice={"type": "tool", "name": "record_intent"},
+        # "any" forces at least one record_intent call but, unlike naming the tool,
+        # still allows Claude to emit one call per task in a multi-task message.
+        tool_choice={"type": "any"},
         messages=[{"role": "user", "content": message}],
     )
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use":
-            return parse_intent(block.input)
-    return Intent(action="answer", reply="Sorry, I did not catch that. Try again?")
+    intents = [
+        parse_intent(block.input)
+        for block in response.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    return intents or [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
 
 
 def _text_of(response) -> str:

@@ -64,11 +64,51 @@ def test_interpret_message_returns_parsed_intent():
     tool_block = SimpleNamespace(type="tool_use", name="record_intent",
                                  input={"action": "add", "text": "call vet"})
     client = FakeClient(SimpleNamespace(content=[tool_block]))
-    intent = llm.interpret_message("remind me to call vet", [_task()], NOW, client)
-    assert intent.action == "add"
-    assert intent.text == "call vet"
+    intents = llm.interpret_message("remind me to call vet", [_task()], NOW, client)
+    assert [i.action for i in intents] == ["add"]
+    assert intents[0].text == "call vet"
     # the task list was passed into the prompt so Claude can reference ids
     assert "taxes" in str(client.messages.calls[0])
+
+
+def test_interpret_message_returns_every_task_in_a_multi_task_message():
+    # A single message can hold several tasks (a pasted list). Each must come back as
+    # its own intent; the old code stopped after the first tool_use block and dropped
+    # the rest (a real bug: five pasted tasks, only "Cancel gym subscription" saved).
+    blocks = [
+        SimpleNamespace(type="tool_use", name="record_intent",
+                        input={"action": "add", "text": "cancel gym subscription"}),
+        SimpleNamespace(type="tool_use", name="record_intent",
+                        input={"action": "add", "text": "file late tax returns"}),
+        SimpleNamespace(type="tool_use", name="record_intent",
+                        input={"action": "add", "text": "file late expense reports"}),
+    ]
+    client = FakeClient(SimpleNamespace(content=blocks))
+    intents = llm.interpret_message("(a list of five tasks)", [], NOW, client)
+    assert [i.text for i in intents] == [
+        "cancel gym subscription",
+        "file late tax returns",
+        "file late expense reports",
+    ]
+
+
+def test_interpret_message_allows_parallel_tool_calls():
+    # tool_choice must permit more than one record_intent call per turn, otherwise a
+    # multi-task message can only ever yield a single task.
+    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
+                                 input={"action": "add", "text": "call vet"})
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("call vet", [], NOW, client)
+    tool_choice = client.messages.calls[0]["tool_choice"]
+    assert tool_choice.get("disable_parallel_tool_use") is not True
+    assert tool_choice["type"] != "tool"  # a named tool forces exactly one call
+
+
+def test_interpret_message_falls_back_when_no_tool_call():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="hmm")]))
+    intents = llm.interpret_message("???", [], NOW, client)
+    assert len(intents) == 1
+    assert intents[0].action == "answer"
 
 
 def test_interpret_prompt_includes_today_for_relative_dates():
