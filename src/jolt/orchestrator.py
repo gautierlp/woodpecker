@@ -20,5 +20,5 @@ def apply_intent(conn, intent: Intent, now: datetime) -> str:
         task = db.drop_task(conn, intent.task_id)
         return "Dropped." if task else "Couldn't find that one."
     if intent.action == "list":
-        return render_backlog(db.list_all(conn))
+        return render_backlog(db.list_all(conn), now)
     return intent.reply or "Not sure what you mean. Try rephrasing?"

@@ -3,8 +3,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 STALE_THRESHOLD_DAYS = 3
-QUIET_START_HOUR = 6   # first hour of the day pings are allowed
-QUIET_END_HOUR = 23    # pings stop at 23:00 (hour 23 and later is quiet)
+DUE_SOON_DAYS = 2  # a deadline this close (or past) counts as urgent
+QUIET_START_HOUR = 6  # first hour of the day pings are allowed
+QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
 NAG_HOURS = (9, 13, 19)
 DAILY_FOCUS_HOUR = 6
 TIMEZONE = "Europe/Paris"

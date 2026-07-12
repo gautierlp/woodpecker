@@ -9,7 +9,7 @@ def send_daily_focus(conn, send, client, now: datetime) -> None:
     tasks = db.list_all(conn)
     focus = select_daily_focus(tasks, now)
     prose = llm.write_focus(focus, now, client)
-    backlog = render_backlog(tasks)
+    backlog = render_backlog(tasks, now)
     send(f"{prose}\n\n{backlog}")
 
 
