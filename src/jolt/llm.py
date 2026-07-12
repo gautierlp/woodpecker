@@ -2,7 +2,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from . import config
-from .models import DailyFocus, Task
+from .models import DailyFocus, PRIORITY_IMPORTANT, Task
+
+
+def _importance(task: Task) -> str:
+    return "important" if task.priority == PRIORITY_IMPORTANT else "normal"
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,8 @@ _TOOL = {
                 "description": "add a task, complete/drop an existing one, list the backlog, or answer a question / reply to the user.",
             },
             "text": {"type": "string", "description": "Task text, for action=add."},
-            "priority": {"type": "string", "enum": ["normal", "important"]},
+            "priority": {"type": "string", "enum": ["normal", "important"],
+                         "description": "For action=add: always judge this from the wording and stakes, never leave it blank. 'important' for anything with real consequences (a deadline, money, health, admin/legal weight); 'normal' otherwise."},
             "deadline": {"type": "string", "description": "ISO date YYYY-MM-DD, if the user gave one."},
             "task_id": {"type": "integer", "description": "The id of the existing task, for complete/drop."},
             "reply": {"type": "string", "description": "For action=answer: the exact message to send back to the user."},
@@ -61,13 +66,19 @@ def _task_lines(tasks: list[Task]) -> str:
     )
 
 
-def interpret_message(message: str, tasks: list[Task], client) -> Intent:
+def interpret_message(message: str, tasks: list[Task], now: datetime, client) -> Intent:
     system = (
         "You are Jolt, a personal accountability bot. Read the user's message and record "
-        "what it means by calling record_intent exactly once. To complete or drop a task, "
+        "what it means by calling record_intent exactly once. When adding a task, judge its "
+        "importance from the wording and stakes and set priority (normal / important); do not "
+        "leave it blank, since the backlog is ranked by importance. To complete or drop a task, "
         "pick the matching task_id from the current backlog. For a question or a blocker "
         "conversation, use action=answer and write a short, plain reply (no cheerleading, "
-        "no em dashes). Current backlog:\n" + _task_lines(tasks)
+        "no em dashes). The user may write in any language, but always store the task text in "
+        "English (translate it if needed). "
+        f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "
+        "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
+        "Current backlog:\n" + _task_lines(tasks)
     )
     response = client.messages.create(
         model=config.MODEL,
@@ -94,14 +105,16 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
     if focus.focus is None:
         return "Nothing on the list today. Enjoy it."
     age = (now - focus.focus.created_at).days
-    rescues = "; ".join(f"{t.text} ({(now - t.created_at).days}d old)" for t in focus.rescues) or "none"
+    rescues = "; ".join(
+        f"{t.text} ({(now - t.created_at).days}d old, {_importance(t)})" for t in focus.rescues
+    ) or "none"
     system = (
-        "You are Jolt. Write a short morning message (2 to 4 lines, no em dashes). Name the "
-        "one focus task as the single thing to do today. If there are rescue tasks that have "
-        "gone stale, mention them and ask what is blocking them. Be plain and direct, never "
-        "guilt-tripping."
+        "You are Jolt. Write a short morning message (2 to 4 lines, no em dashes). Lead with the "
+        "one focus task as the single thing to hit today, and push harder on important tasks than "
+        "low-stakes ones. If there are rescue tasks that have gone stale, mention them and ask what "
+        "is blocking them. Be plain and direct, never guilt-tripping."
     )
-    user = f"Focus task: {focus.focus.text} ({age}d old). Rescues: {rescues}."
+    user = f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)}). Rescues: {rescues}."
     return _text_of(client.messages.create(
         model=config.MODEL, max_tokens=300, system=system,
         messages=[{"role": "user", "content": user}],
@@ -112,11 +125,12 @@ def write_nag(task: Task, now: datetime, client) -> str:
     age = (now - task.created_at).days
     system = (
         "You are Jolt. Write one short nag (1 to 2 lines, no em dashes) about the task below. "
-        "The older it is and the later in the day, the more direct and blunt you get: gentle in "
-        "the morning, pointed by evening. If it is several days old, first ask what is actually "
-        "blocking it before pushing. Never guilt-trip."
+        "Push harder the more important the task is, the older it is, and the later in the day it "
+        "is: an important task dodged for days gets blunt and insistent by evening; a normal, "
+        "low-stakes task stays gentle and easy to wave off. If it is several days old, first ask "
+        "what is actually blocking it before pushing. Never guilt-trip."
     )
-    user = f"Task: {task.text}. Age: {age} days. Current hour: {now.hour}."
+    user = f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. Current hour: {now.hour}."
     return _text_of(client.messages.create(
         model=config.MODEL, max_tokens=200, system=system,
         messages=[{"role": "user", "content": user}],

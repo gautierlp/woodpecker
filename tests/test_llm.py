@@ -57,15 +57,71 @@ def _task(id=1):
                 last_nagged_at=None, completed_at=None)
 
 
+NOW = datetime(2026, 7, 12, 15, tzinfo=TZ)
+
+
 def test_interpret_message_returns_parsed_intent():
     tool_block = SimpleNamespace(type="tool_use", name="record_intent",
                                  input={"action": "add", "text": "call vet"})
     client = FakeClient(SimpleNamespace(content=[tool_block]))
-    intent = llm.interpret_message("remind me to call vet", [_task()], client)
+    intent = llm.interpret_message("remind me to call vet", [_task()], NOW, client)
     assert intent.action == "add"
     assert intent.text == "call vet"
     # the task list was passed into the prompt so Claude can reference ids
     assert "taxes" in str(client.messages.calls[0])
+
+
+def test_interpret_prompt_includes_today_for_relative_dates():
+    # "tomorrow evening" only resolves if Claude knows today's date; without it the
+    # deadline is hallucinated (a real bug: it once saved 2025-01-09 for "demain soir").
+    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
+                                 input={"action": "add", "text": "invoices"})
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("invoices by tomorrow evening", [], NOW, client)
+    assert "2026-07-12" in client.messages.calls[0]["system"]
+
+
+def test_interpret_prompt_instructs_english_task_text():
+    # Tasks are often typed in French but must be stored in English.
+    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
+                                 input={"action": "add", "text": "invoices"})
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("factures client", [], NOW, client)
+    assert "english" in client.messages.calls[0]["system"].lower()
+
+
+def test_interpret_prompt_instructs_importance_inference():
+    # Most tasks are captured casually with no explicit priority, so the prompt must
+    # tell Claude to judge importance rather than only copy an explicit signal.
+    tool_block = SimpleNamespace(type="tool_use", name="record_intent",
+                                 input={"action": "add", "text": "book the vet"})
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("book the vet", [], NOW, client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "importance" in system or "important" in system
+
+
+def _important_task(id=1):
+    return Task(id=id, text="file the tax return", priority=PRIORITY_IMPORTANT, deadline=None,
+                created_at=datetime(2026, 7, 3, tzinfo=TZ), status=STATUS_PENDING,
+                last_nagged_at=None, completed_at=None)
+
+
+def test_write_nag_passes_importance_to_prompt():
+    # An important + old task must push harder than a normal one, so the prompt has to
+    # know the task is important, not just its age.
+    text_block = SimpleNamespace(type="text", text="go")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    llm.write_nag(_important_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    assert "important" in str(client.messages.calls[0]).lower()
+
+
+def test_write_focus_passes_importance_to_prompt():
+    text_block = SimpleNamespace(type="text", text="ok")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    focus = DailyFocus(focus=_important_task(1), rescues=[_important_task(2)])
+    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    assert "important" in str(client.messages.calls[0]).lower()
 
 
 def test_write_focus_returns_text():

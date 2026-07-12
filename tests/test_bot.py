@@ -25,7 +25,7 @@ def make_context(conn, intent, chat_id=42):
 def test_handle_message_adds_task_and_replies(monkeypatch):
     conn = fresh()
     monkeypatch.setattr(bot.llm, "interpret_message",
-                        lambda msg, tasks, client: Intent(action="add", text="call vet"))
+                        lambda msg, tasks, now, client: Intent(action="add", text="call vet"))
     update = make_update("remind me to call vet")
     context = make_context(conn, None)
     asyncio.run(bot.handle_message(update, context))
