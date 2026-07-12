@@ -21,9 +21,12 @@ def setup_logging() -> None:
         level=config.log_level(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    for lib in ("telegram", "httpx", "anthropic", "apscheduler"):
+    for lib in ("telegram", "anthropic", "apscheduler"):
         logging.getLogger(lib).setLevel(logging.INFO)
-    for wire in ("httpcore", "hpack"):
+    # httpx logs each request URL at INFO, and the Telegram token lives in that URL
+    # path, so keep it at WARNING to avoid writing the bot token to the logs. Our own
+    # jolt.* lines and _log_usage already cover what those requests were doing.
+    for wire in ("httpx", "httpcore", "hpack"):
         logging.getLogger(wire).setLevel(logging.WARNING)
 
 
