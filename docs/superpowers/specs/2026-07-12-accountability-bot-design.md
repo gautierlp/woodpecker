@@ -1,7 +1,9 @@
 # Accountability bot — design spec
 
 **Date:** 2026-07-12
-**Status:** Approved (2026-07-12), implementation plan written
+**Status:** Approved (2026-07-12). Revised 2026-07-12: core framing corrected from
+"one focused thing a day" to "a todo list that chases you," and the avoidance signal
+sharpened from pure age to importance combined with age.
 
 ## Problem
 
@@ -17,10 +19,19 @@ rather than gentle passivity.
 
 ## Goal
 
-A Telegram bot that holds the user's backlog, nudges them toward one focused thing each
-day, and gets pointedly insistent about tasks they've been quietly avoiding, all in
-plain language. It must fight overwhelm (small daily surface) and avoidance
-(escalation on stale tasks) at the same time.
+A todo list that chases the user. It holds the full backlog (which the user intends to
+clear entirely), and its one job is to keep pushing the tasks the user is avoiding back
+into their face, ranked by how much they are being dodged. Everything else (the daily
+message, the nags) is a delivery mechanism for that push, in plain language.
+
+This is **not** a "one focused thing a day" app. The user wants to complete the whole
+list, ordered by avoidance / importance / urgency, like any todo app. The single
+specific twist is that Jolt actively pushes the user at the thing(s) they keep avoiding
+instead of sitting there passively waiting.
+
+The "small daily surface" survives only as a **presentation** rule against overwhelm:
+lead with a few pushed items, never open with a wall of 40 lines. It is not a cap on
+how much the user may do in a day.
 
 ## Non-goals
 
@@ -35,8 +46,11 @@ plain language. It must fight overwhelm (small daily surface) and avoidance
 
 - The user texts the bot naturally at any time: *"call the accountant by friday"*,
   *"book the vet, important"*.
-- Claude parses the message and extracts: task text, optional priority signal,
-  optional deadline. Saves it to the backlog.
+- Claude parses the message and extracts: task text, an **inferred importance**
+  (normal / important), optional deadline. Saves it to the backlog. Importance is
+  judged by Claude from the wording and context, not left blank, because the avoidance
+  ranking (below) is only meaningful if most tasks carry a real importance. The user
+  can override in plain language ("this isn't urgent", "this one's important").
 - If an apparently important task is missing context, the bot asks **once**. If the
   user doesn't answer, the task is saved with **no urgency**. Capture never blocks on
   a follow-up.
@@ -47,9 +61,10 @@ plain language. It must fight overwhelm (small daily surface) and avoidance
 
 Two parts in one message:
 
-1. **Focus (Claude-written).** A short, human message naming the single top-priority
-   task ("if you do one thing today, this") plus **at most 2** tasks that have gone
-   stale and need rescuing. Max ~3 items surfaced with intent.
+1. **Focus (Claude-written).** A short, human message that leads with one clear "hit
+   this" item (the top of the avoidance-aware ordering) plus **at most 2** avoided
+   tasks to rescue (stale, important-first). Max ~3 items surfaced with intent. This is
+   the anti-overwhelm surface, not a limit on the day: the user is free to clear more.
 2. **Full backlog (plain code, no LLM).** A clean, deterministic dump of every pending
    task, ordered by priority, appended below the focus. This is rendered
    programmatically — never sent through Claude — so it is cheap and, more importantly,
@@ -67,17 +82,29 @@ Ordering: focus at the top, full list underneath as reference.
 
 ### The avoidance hunter (core differentiator)
 
+This is the whole product. The ranking and the daily push all exist to answer one
+question: *what should the bot shove in front of the user right now?*
+
 - **Detection: pure age.** Any pending task that has existed **3 days** without being
-  completed is flagged as stale. (Threshold is a single tunable constant.)
+  completed is a stale candidate. (Threshold is a single tunable constant.) Age is a
+  cheap, deterministic gate; it decides *candidacy*, not intensity.
+- **Ranking: importance decides how hard the bot pushes.** An old task that is
+  **important** is the real avoidance signal (the user knows it matters and still isn't
+  starting). An old task that is **normal** is more likely a harmless "someday" thing.
+  So among stale tasks, important-then-oldest ranks to the top, and the nag tone scales
+  with **both** importance and age:
+  - important + old → loud, blunt, top of the push.
+  - normal + old → quiet, low priority, easy to wave off.
 - **Response: get curious first, then get louder** (user chose "A + B"):
   1. On first flagging, the bot asks what is actually blocking the task and offers to
      break it down or kill it: *"'Sort the insurance' has sat 4 days. What's actually
      blocking it? Want to break it down or drop it?"*
   2. If the user keeps dodging, the bot escalates: more frequent, blunter
      (*"9 days now. It's a 2-minute call. Do it or delete it."*).
-- The "get curious" step is the humane guard against pure-age false positives: a
-  genuine "someday" task just gets *"nothing, it's a someday thing"* and the bot
-  backs off (de-prioritizes / stops escalating that task).
+- The "get curious" step and the importance weighting together guard against false
+  positives: a genuine "someday" task is both low-importance (quiet by default) and can
+  be waved off (*"nothing, it's a someday thing"*), after which the bot backs off
+  (de-prioritizes / stops escalating that task).
 
 ### Completion
 
@@ -121,9 +148,10 @@ calculation, priority ordering, quiet-hours enforcement, scheduling).
 - `last_nagged_at` (nullable)
 - `completed_at` (nullable)
 
-Escalation intensity is derived from age past the 3-day threshold; no separate
-defer-count column is required for the chosen design, though `last_nagged_at` governs
-nag cadence.
+Escalation intensity is derived from **importance combined with age** past the 3-day
+threshold (important + old pushes hardest); no separate defer-count column is required
+for the chosen design, though `last_nagged_at` governs nag cadence. `priority` is
+therefore load-bearing: it is inferred by Claude at capture, not left null.
 
 ### Stale detection rule
 
@@ -134,10 +162,16 @@ Telegram or Claude calls.
 ### Daily-focus selection rule
 
 From the pending tasks:
-- **Focus item:** the single highest-priority task (ties broken by nearest deadline,
-  then oldest).
-- **Rescues:** up to 2 stale tasks not already the focus item.
-- These feed the Claude-written focus; the full ordered list feeds the plain dump.
+- **Focus item ("hit this"):** avoidance wins the lead spot. If any **important** task
+  is stale, the most-avoided one (important, then oldest) leads. Only when nothing
+  important is being dodged does the lead fall back to the top of the ordinary priority
+  order (important first, nearest deadline, then oldest). A fresh important task
+  therefore leads only when no important task is being avoided.
+- **Rescues:** up to 2 stale tasks not already the focus item, important-first so the
+  most-avoided tasks surface before harmless old ones.
+- These feed the Claude-written focus, which also receives each surfaced task's
+  importance and age so the tone can push harder on important + old items. The full
+  ordered list feeds the plain dump.
 
 Also a pure, testable function.
 
@@ -158,8 +192,11 @@ TDD on the pure logic, which is where the real behavior lives:
 
 - Task parsing (given a Claude-extracted structure → correct row). Claude call mocked.
 - Stale-detection rule (age boundary at exactly 3 days).
-- Daily-focus selection (priority / deadline / age tie-breaking; rescue selection;
-  the ≤3 surfaced cap).
+- Daily-focus selection (importance / deadline / age tie-breaking; rescue selection is
+  important-first among stale tasks; the ≤3 surfaced cap).
+- Nag/focus tone inputs: the prose prompts receive importance as well as age, so an
+  important + old task is pushed harder than a normal + old one (assert the importance
+  flag reaches the prompt; LLM wording itself is not asserted).
 - Priority ordering for the backlog dump.
 - Quiet-hours enforcement (no ping scheduled or sent before 06:00 / after 23:00).
 

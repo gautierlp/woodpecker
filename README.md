@@ -16,7 +16,7 @@
   <h3 align="center">Jolt</h3>
 
   <p align="center">
-    The one-thing accountability bot. One focused task a day, and no hiding from it.
+    A todo list that chases you. It pushes the tasks you keep avoiding back in your face, and does not let you hide.
     <br />
     <a href="docs/superpowers/specs/2026-07-12-accountability-bot-design.md"><strong>Read the design spec »</strong></a>
     <br />
@@ -66,9 +66,9 @@
 
 [![Jolt][product-cover]](docs/assets/jolt-social.png)
 
-> 🚧 **Early days.** The design is locked (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)); the bot itself is not built yet. The Usage section below describes the *intended* interface, not shipped behavior.
+> 🚧 **Built, not yet deployed.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)); it is not yet running on the homelab host. The Usage section below describes the intended interface.
 
-Jolt is a private Telegram bot that fights task avoidance. Most todo apps just hold a list, and a long list is itself the thing that overwhelms you into doing nothing. Jolt does the opposite: it keeps your backlog out of sight, surfaces **one focused thing a day**, and gets pointedly insistent about tasks you have been quietly postponing.
+Jolt is a private Telegram bot that fights task avoidance. It is an ordinary todo list (you keep a full backlog and mean to clear all of it), with one specific twist: instead of sitting there passively like every other list, Jolt **actively pushes you at the tasks you keep avoiding**, ranked by how much you are dodging them. An important task that has sat untouched for days is the signal it is being deferred, and that is exactly what Jolt shoves back in your face.
 
 It is built around one personal fact: persistent nagging actually works on its user. So Jolt leans into persistence rather than passivity, while staying humane (it asks what is blocking you before it gets loud, and it never pings during quiet hours).
 
@@ -79,9 +79,9 @@ Single-user, self-hosted, not a SaaS.
 ### How It Works
 
 1. **Capture, friction-free.** You text Jolt naturally ("call the accountant by friday"). Claude reads it and files the task, asking once for context only if it matters.
-2. **Daily focus at 06:00.** A short, Claude-written message names the single thing to do today plus any stale task that needs rescuing, followed by a plain, mechanical dump of the full backlog for reference.
-3. **Nag through the day.** Morning, midday, evening. If the focus task is still untouched by evening, the tone gets more direct. Never before 06:00, never after 23:00.
-4. **Hunt avoidance.** Anything sitting untouched for 3 days gets flagged. Jolt first asks what is blocking it (break it down? drop it?), and escalates only if you keep dodging.
+2. **Daily push at 06:00.** A short, Claude-written message leads with one clear "hit this" item plus the tasks you are avoiding most, followed by a plain, mechanical dump of the full backlog for reference. Leading with a few items is an anti-overwhelm choice, not a cap: clear as much as you like.
+3. **Nag through the day.** Morning, midday, evening. If the pushed task is still untouched by evening, the tone gets more direct. Never before 06:00, never after 23:00.
+4. **Hunt avoidance.** Anything sitting untouched for 3 days is a candidate. Importance decides how hard Jolt pushes: an important old task is loud and top of the pile, a low-stakes old task stays quiet. Jolt first asks what is blocking it (break it down? drop it?), and escalates only if you keep dodging.
 5. **Close it out.** You say "done with the taxes" and Jolt marks it complete with a plain acknowledgment.
 
 A deliberate split runs through the whole thing: **Claude** handles judgment and tone (parsing, intent, the focus and nag messages); **plain code** handles anything mechanical (the backlog dump, the stale-age math, ordering, quiet hours, scheduling). A mechanical list should never be reworded or hallucinated.
@@ -124,7 +124,7 @@ cp .env.example .env          # then fill in your Telegram + Anthropic keys
 uv run python src/main.py     # run locally
 ```
 
-> The `src/` app does not exist yet — this is the intended setup once implementation lands. Track progress in the [Roadmap](#roadmap).
+> This runs the built app locally. Deployment to the homelab host is the remaining step; track it in the [Roadmap](#roadmap).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -142,7 +142,7 @@ you  → this week
 Jolt → Noted, due Friday.
 
 you  → what should I do today?
-Jolt → One thing: book the vet (due Friday). If you do nothing else, do this.
+Jolt → Hit this first: book the vet (due Friday). Also still dodging: sort the insurance (5 days).
 
 you  → done with the vet
 Jolt → Done, nice.
@@ -150,13 +150,13 @@ Jolt → Done, nice.
 
 ### The daily rhythm
 
-- **06:00** — the focus message (one task + any rescues), then the full backlog underneath.
-- **Morning / midday / evening** — up to three nudges on the focus task; blunter by evening if untouched.
+- **06:00** — the daily push ("hit this" + the tasks you are avoiding most), then the full backlog underneath.
+- **Morning / midday / evening** — up to three nudges; blunter by evening if untouched, and louder on important tasks than low-stakes ones.
 - **Quiet hours** — nothing before 06:00 or after 23:00, ever.
 
 ### The avoidance hunter
 
-A task untouched for **3 days** is flagged as stale. Jolt gets curious before it gets loud:
+A task untouched for **3 days** becomes a candidate. How hard Jolt pushes depends on importance: an important task that has gone stale is the real avoidance signal (you know it matters and still are not starting), so it ranks to the top and gets loud; a low-stakes stale task stays quiet at the bottom. Jolt gets curious before it gets loud:
 
 ```
 Jolt → "Sort the insurance" has sat 4 days. What's actually blocking it —
@@ -172,11 +172,11 @@ Keep dodging and it escalates. Say "it's a someday thing" and it backs off. The 
 
 - [x] Design spec ([`docs/superpowers/specs/`](docs/superpowers/specs/2026-07-12-accountability-bot-design.md))
 - [x] Brand identity (icon + cover)
-- [ ] Implementation plan
-- [ ] Storage + task logic (SQLite, add/complete/drop, ordering)
-- [ ] Stale detection + daily-focus selection (pure, tested)
-- [ ] Claude message interpretation + intent classification
-- [ ] Telegram layer + scheduler (06:00 focus, nags, stale-scan)
+- [x] Implementation plan
+- [x] Storage + task logic (SQLite, add/complete/drop, ordering)
+- [x] Stale detection + daily-focus selection (pure, tested)
+- [x] Claude message interpretation + intent classification
+- [x] Telegram layer + scheduler (06:00 focus, nags, stale-scan)
 - [ ] Deploy to `jarvis` (Docker + git auto-deploy)
 
 See the [open issues](https://github.com/gautierlp/jolt/issues) for the running list.
@@ -222,7 +222,7 @@ Project Link: [https://github.com/gautierlp/jolt](https://github.com/gautierlp/j
 [python-url]: https://www.python.org/
 [claude-shield]: https://img.shields.io/badge/powered%20by-Claude-D97757.svg?style=for-the-badge&logo=anthropic&logoColor=white
 [claude-url]: https://www.anthropic.com/claude
-[status-shield]: https://img.shields.io/badge/status-in%20design-E11D48.svg?style=for-the-badge
+[status-shield]: https://img.shields.io/badge/status-built%2C%20not%20deployed-E11D48.svg?style=for-the-badge
 [status-url]: #roadmap
 [product-cover]: docs/assets/jolt-social.png
 [python-badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white
