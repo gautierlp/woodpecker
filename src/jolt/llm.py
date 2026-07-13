@@ -63,10 +63,17 @@ def parse_intent(tool_input: dict) -> Intent:
     )
 
 
+# strict=False on purpose. Strict tool use constrains generation to the schema grammar,
+# and in practice that made the model stop populating optional fields on an edit: it would
+# emit {"action": "edit", "task_id": N} and silently drop the new deadline or reworded text
+# into "reply" or nowhere, so deadline changes and partial-completion rewrites were lost.
+# Both Haiku and Sonnet failed the same way under strict and both work with it off, so this
+# is the schema, not the model. We do not need the grammar guarantee: parse_intent already
+# survives a malformed block and _resolve_positions handles out-of-range numbers.
 _TOOL = {
     "name": "record_intent",
     "description": "Record what the user's Telegram message means for their task list.",
-    "strict": True,
+    "strict": False,
     "input_schema": {
         "type": "object",
         "additionalProperties": False,
@@ -90,7 +97,8 @@ _TOOL = {
                 "type": "string",
                 "description": "The task's wording. This is the ONLY field a task's text ever goes "
                 "in, never reply. For action=add, the new task. For action=edit, the reworded "
-                "text. For action=merge, the combined text of the kept task.",
+                "text (when the user finished part of a multi-part task, keep only the parts still "
+                "to do). For action=merge, the combined text of the kept task.",
             },
             "priority": {
                 "type": "string",
@@ -99,7 +107,11 @@ _TOOL = {
             },
             "deadline": {
                 "type": "string",
-                "description": "ISO date YYYY-MM-DD, if the user gave one.",
+                "description": "The task's due date as an ISO YYYY-MM-DD date, for action=add or "
+                "action=edit. Fill this whenever the user gives a deadline, including relative "
+                "ones (today, tomorrow, Wednesday, next week): resolve them to an ISO date. For "
+                "'move to tomorrow' or 'deadline should be tomorrow' on an existing task, this is "
+                "the field that carries the new date. Leave unset only when there is no deadline.",
             },
             "task_id": {
                 "type": "integer",
@@ -164,6 +176,22 @@ def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime)
     )
 
 
+# Which position-numbered id fields each action actually acts on. Anything not listed is
+# noise the model sometimes sprays onto an intent (a stray task_id on an add, a stray
+# blocked_by on an edit). We only validate and resolve the fields the action uses;
+# validating the rest would reject a perfectly good intent over a number it was never
+# going to touch. Actions absent from this map (add, list, answer) use no position number.
+_ID_FIELDS = {
+    "complete": ("task_id",),
+    "drop": ("task_id",),
+    "edit": ("task_id",),
+    "unblock": ("task_id",),
+    "block": ("task_id", "blocked_by"),
+    "merge": ("task_id", "merge_from"),
+}
+_ALL_ID_FIELDS = ("task_id", "blocked_by", "merge_from")
+
+
 def _resolve_positions(
     intents: list[Intent], display_ids: list[int] | None, tasks: list[Task], now: datetime
 ) -> list[Intent]:
@@ -180,13 +208,14 @@ def _resolve_positions(
         pos_to_id = {pos: tid for pos, tid in enumerate(display_ids, 1)}
     resolved = []
     for intent in intents:
-        missing = [
-            n
-            for n in (intent.task_id, intent.blocked_by, intent.merge_from)
-            if n is not None and n not in pos_to_id
-        ]
+        used = _ID_FIELDS.get(intent.action, ())
+        # Clear the id fields this action does not use, so a stray number the model tacked
+        # on can neither derail resolution nor leak into the orchestrator.
+        cleared = {f: None for f in _ALL_ID_FIELDS if f not in used}
+        positions = {f: getattr(intent, f) for f in used if getattr(intent, f) is not None}
+        missing = [n for n in positions.values() if n not in pos_to_id]
         if missing:
-            numbers = " or ".join(str(n) for n in missing)
+            numbers = " or ".join(dict.fromkeys(str(n) for n in missing))
             logger.warning(
                 "Task number(s) %s not on the last list shown; asking to clarify", missing
             )
@@ -202,14 +231,8 @@ def _resolve_positions(
                 )
             )
             continue
-        changes = {}
-        if intent.task_id is not None:
-            changes["task_id"] = pos_to_id[intent.task_id]
-        if intent.blocked_by is not None:
-            changes["blocked_by"] = pos_to_id[intent.blocked_by]
-        if intent.merge_from is not None:
-            changes["merge_from"] = pos_to_id[intent.merge_from]
-        resolved.append(replace(intent, **changes) if changes else intent)
+        changes = {**cleared, **{f: pos_to_id[n] for f, n in positions.items()}}
+        resolved.append(replace(intent, **changes))
     return resolved
 
 
@@ -252,7 +275,12 @@ def interpret_message(
         "Only merge when they ask to combine existing tasks, not when they describe a dependency. "
         "To change an existing task rather than add a new one, use action=edit with its task_id "
         "and only the fields that change: a new deadline, a new priority (normal/important), or "
-        "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. To "
+        "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. "
+        "When the user reports that only part of a multi-part or checklist task is done (for "
+        "example 'shower and teeth are done' about 'Groom Rex: shower, wash ears, brush teeth'), "
+        "do not mark the whole task complete and do not leave it unchanged: use action=edit with "
+        "text reworded to keep only what is still left (here, 'Groom Rex: wash ears'). If every "
+        "part is now done, use action=complete instead. To "
         "remove a due date entirely, use action=edit with clear_deadline=true. A message like "
         "'change all due dates to today' becomes one edit call per pending task. "
         "You may be given earlier turns of this conversation before the latest message. Use them to "

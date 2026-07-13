@@ -575,8 +575,12 @@ def test_build_client_sets_a_short_timeout():
     assert config.ANTHROPIC_TIMEOUT_SECONDS <= 60
 
 
-def test_tool_schema_is_strict():
-    assert llm._TOOL["strict"] is True
+def test_tool_schema_is_not_strict():
+    # strict must stay False: strict tool use constrained generation so the model dropped
+    # optional fields on edits (a deadline change or reworded text vanished). See the note
+    # on _TOOL. parse_intent and _resolve_positions provide the robustness strict was meant
+    # to give.
+    assert llm._TOOL["strict"] is False
     assert llm._TOOL["input_schema"]["additionalProperties"] is False
 
 
@@ -663,3 +667,46 @@ def test_resolve_positions_out_of_range_merge_from_clarifies():
     assert resolved[0].action == "answer"
     assert "9" in resolved[0].reply
     assert resolved[0].merge_from is None
+
+
+def test_resolve_positions_ignores_stray_ids_on_add():
+    # The model intermittently sprays position numbers onto an add (a stray task_id,
+    # blocked_by or merge_from) that the add never uses. Those numbers are often out of
+    # range, and validating them used to reject the whole add as "task not found", losing
+    # the task the user asked to add. An add must survive regardless, with the noise cleared.
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(
+        action="add", text="buy olive oil", task_id=37, blocked_by=37, merge_from=37
+    )
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "add"
+    assert resolved[0].text == "buy olive oil"
+    assert resolved[0].task_id is None
+    assert resolved[0].blocked_by is None
+    assert resolved[0].merge_from is None
+
+
+def test_resolve_positions_ignores_stray_blocked_by_on_edit():
+    # An edit only acts on task_id; a stray blocked_by the model tacked on must not turn a
+    # valid edit into a clarification and lose the change.
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(action="edit", task_id=1, blocked_by=99, deadline=date(2026, 7, 14))
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "edit"
+    assert resolved[0].task_id == 10
+    assert resolved[0].blocked_by is None
+    assert resolved[0].deadline == date(2026, 7, 14)
+
+
+def test_resolve_positions_dedupes_repeated_missing_numbers():
+    # A block that names the same out-of-range number for both fields must read "9", not
+    # the old "9 or 9 or 9".
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(action="block", task_id=9, blocked_by=9)
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "answer"
+    assert "9 or 9" not in resolved[0].reply
+    assert "9" in resolved[0].reply
