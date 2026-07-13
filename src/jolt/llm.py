@@ -73,10 +73,25 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "complete", "drop", "edit", "block", "unblock", "merge", "list", "answer"],
+                "enum": [
+                    "add",
+                    "complete",
+                    "drop",
+                    "edit",
+                    "block",
+                    "unblock",
+                    "merge",
+                    "list",
+                    "answer",
+                ],
                 "description": "add a task, complete/drop an existing one, edit an existing task's deadline/priority/text, block a task on another / unblock it, merge two tasks into one, list the backlog, or answer a question / reply to the user.",
             },
-            "text": {"type": "string", "description": "Task text, for action=add."},
+            "text": {
+                "type": "string",
+                "description": "The task's wording. This is the ONLY field a task's text ever goes "
+                "in, never reply. For action=add, the new task. For action=edit, the reworded "
+                "text. For action=merge, the combined text of the kept task.",
+            },
             "priority": {
                 "type": "string",
                 "enum": ["normal", "important"],
@@ -103,7 +118,9 @@ _TOOL = {
             },
             "reply": {
                 "type": "string",
-                "description": "For action=answer: the exact message to send back to the user.",
+                "description": "For action=answer ONLY: the exact message to send back to the "
+                "user. Never put a task's wording or a reworded edit here; that always goes in "
+                "text.",
             },
             "clear_deadline": {
                 "type": "boolean",
@@ -170,7 +187,9 @@ def _resolve_positions(
         ]
         if missing:
             numbers = " or ".join(str(n) for n in missing)
-            logger.warning("Task number(s) %s not on the last list shown; asking to clarify", missing)
+            logger.warning(
+                "Task number(s) %s not on the last list shown; asking to clarify", missing
+            )
             resolved.append(
                 replace(
                     intent,
@@ -215,7 +234,12 @@ def interpret_message(
         "task is listed as 'number: text', where the number is what the user sees. To act on a "
         "task (complete, drop, edit, block), pass that exact number as task_id (and as "
         "blocked_by for a prerequisite): the user's '2' in 'complete 2' or '34 blocks 35' is "
-        "that number. When the user describes a task in words rather than typing a number, match it to the "
+        "that number. These numbers are only valid for the backlog shown right now: the list is "
+        "renumbered whenever a task is completed or added, so a number that appeared in an earlier "
+        "turn of this conversation may now point to a different task. Never reinterpret or quote a "
+        "number from an earlier turn against the current backlog; when you refer back to something "
+        "discussed earlier, name the task by its text, not by its number. "
+        "When the user describes a task in words rather than typing a number, match it to the "
         "backlog line by its text and use that line's number; only treat a bare number as task_id "
         "when the user actually typed that number. When the user says one task must "
         "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
@@ -284,7 +308,10 @@ def interpret_message(
             # a multi-task message. Degrade just this item to a clarification.
             logger.warning("Could not parse an intent block (%s): %r", exc, block.input)
             intents.append(
-                Intent(action="answer", reply="I couldn't make sense of part of that. Try rephrasing it?")
+                Intent(
+                    action="answer",
+                    reply="I couldn't make sense of part of that. Try rephrasing it?",
+                )
             )
     truncated = getattr(response, "stop_reason", None) == "max_tokens"
     if truncated:

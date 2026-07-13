@@ -148,11 +148,18 @@ def test_edit_intent_changes_priority():
     assert reply == "Updated."
 
 
-def test_edit_intent_empty_change_is_rejected():
+def test_edit_intent_empty_change_asks_what_to_change():
+    # An edit that carries no concrete change is the model's usual output when the user
+    # reports part of a compound task done ("shower is done" on "Groom Rex: shower,
+    # wash ears, brush teeth"). We can't tick off part of a task, so instead of the old
+    # dead-end "Nothing to change.", say what we can do and ask for the new wording.
     conn = fresh()
     t = db.add_task(conn, "x", "normal", None, NOW)
     reply = orchestrator.apply_intent(conn, Intent(action="edit", task_id=t.id), NOW)
-    assert reply == "Nothing to change."
+    assert reply == (
+        "I can only change a task as a whole, not tick off part of one. Tell me the new "
+        "wording if you want it trimmed down, or say it's fully done."
+    )
 
 
 def test_edit_intent_unknown_id_is_graceful():

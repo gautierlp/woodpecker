@@ -52,7 +52,14 @@ def apply_intent(conn, intent: Intent, now: datetime) -> str:
             and intent.deadline is None
             and not intent.clear_deadline
         ):
-            return "Nothing to change."
+            # The model emits a change-less edit mainly when the user reports part of a
+            # compound task done ("shower is done" on "Groom Rex: shower, wash ears,
+            # brush teeth"). We can't tick off part of a task, so be honest and offer the
+            # two things we can do, rather than the old dead-end "Nothing to change."
+            return (
+                "I can only change a task as a whole, not tick off part of one. Tell me the new "
+                "wording if you want it trimmed down, or say it's fully done."
+            )
         if intent.deadline is not None:
             task = db.update_task(
                 conn,
