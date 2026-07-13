@@ -189,8 +189,10 @@ def interpret_message(
         "'yes', 'do it', 'the first one' and the like, treat it as confirming that action and record "
         "the concrete intent (for example the block you proposed), not a contextless answer. "
         "For a question or a blocker conversation, use "
-        "action=answer and write a short, plain reply (no cheerleading, no em dashes). The user may "
+        "action=answer and write a short, plain reply, no cheerleading. The user may "
         "write in any language, but always store the task text in English (translate it if needed). "
+        "Never use an em dash (the '—' character) in your reply. Use a comma, a colon, or a period "
+        "instead. This rule has no exceptions. "
         f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
     )
@@ -249,12 +251,14 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
         or "none"
     )
     system = (
-        "You are Jolt. Write a short morning message (2 to 4 lines, no em dashes). Lead with the "
+        "You are Jolt. Write a short morning message (2 to 4 lines). Lead with the "
         "one focus task as the single thing to hit today, and push harder on important tasks than "
         "low-stakes ones. If there are rescue tasks that have gone stale, mention them: for an "
         "important rescue ask what is blocking it, but for a low-stakes (normal) rescue lean the "
         "other way and ask whether it is still worth keeping or should just be dropped. Be plain "
-        "and direct, never guilt-tripping."
+        "and direct, never guilt-tripping. "
+        "Never use an em dash (the '—' character). Use a comma, a colon, or a period instead. "
+        "This rule has no exceptions."
     )
     user = f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)}). Rescues: {rescues}."
     response = client.messages.create(
@@ -285,9 +289,10 @@ def write_nag(task: Task, now: datetime, client) -> str:
             "light and easy to wave off."
         )
     system = (
-        "You are Jolt. Write one short nag (1 to 2 lines, no em dashes) about the task below. "
+        "You are Jolt. Write one short nag (1 to 2 lines) about the task below. "
         + guidance
-        + " Never guilt-trip."
+        + " Never guilt-trip. Never use an em dash (the '—' character); use a comma, a colon, or a "
+        "period instead. This rule has no exceptions."
     )
     user = (
         f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. "
