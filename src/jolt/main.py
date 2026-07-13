@@ -58,9 +58,14 @@ def build_scheduler(conn, send, client, chat_id) -> AsyncIOScheduler:
     async def _nags():
         scheduler.send_nags(conn, send, client, config.now_paris())
 
-    sched.add_job(_daily_focus, CronTrigger(hour=config.DAILY_FOCUS_HOUR, minute=0))
+    # Pass the timezone to every CronTrigger explicitly. APScheduler does NOT stamp the
+    # scheduler's timezone onto a trigger; a trigger built without one defaults to the
+    # machine's local zone (UTC in the container), so every job fired 2 hours off Paris.
+    sched.add_job(
+        _daily_focus, CronTrigger(hour=config.DAILY_FOCUS_HOUR, minute=0, timezone=config.TIMEZONE)
+    )
     for nag_hour in config.NAG_HOURS:
-        sched.add_job(_nags, CronTrigger(hour=nag_hour, minute=0))
+        sched.add_job(_nags, CronTrigger(hour=nag_hour, minute=0, timezone=config.TIMEZONE))
     return sched
 
 

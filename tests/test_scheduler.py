@@ -103,6 +103,25 @@ def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
         assert inspect.iscoroutinefunction(job.func), f"{job.func} must be a coroutine"
 
 
+def test_scheduled_jobs_fire_in_the_configured_timezone(monkeypatch):
+    """Regression: APScheduler's CronTrigger defaults to the machine's local zone, and
+    add_job does not stamp the scheduler's timezone onto a trigger that already carries
+    one. In the container (local zone UTC) every job fired 2 hours late: the 06:00 focus
+    arrived at 08:00 Paris, the 19:00 nag at 21:00. We force the local zone to UTC here so
+    the test reproduces the container regardless of the developer's machine zone; each
+    trigger must still carry the configured Europe/Paris zone."""
+    import apscheduler.triggers.cron as cron_module
+
+    monkeypatch.setattr(cron_module, "get_localzone", lambda: ZoneInfo("Etc/UTC"))
+    conn = fresh()
+    sent, send = collector()
+    sched = main.build_scheduler(conn, send, FakeClient(), chat_id=42)
+    for job in sched.get_jobs():
+        assert str(job.trigger.timezone) == config.TIMEZONE, (
+            f"{job.func} trigger tz is {job.trigger.timezone}, expected {config.TIMEZONE}"
+        )
+
+
 def test_nag_sends_and_marks_nagged():
     conn = fresh()
     created = datetime(2026, 7, 8, tzinfo=TZ)
