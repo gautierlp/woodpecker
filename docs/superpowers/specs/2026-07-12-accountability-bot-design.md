@@ -4,6 +4,11 @@
 **Status:** Approved (2026-07-12). Revised 2026-07-12: core framing corrected from
 "one focused thing a day" to "a todo list that chases you," and the avoidance signal
 sharpened from pure age to importance combined with age.
+Revised 2026-07-13 (after reading *Eat That Frog!*): framing moved off "clear the whole
+list" to "chase the vital few, shed the trivial many." The full backlog stays the
+record, but the avoidance response now diverges by importance (start-leaning for frogs,
+drop-leaning for tadpoles) and waved-off low-value tasks re-surface on a slow cadence
+instead of going silent. No schema change.
 
 ## Problem
 
@@ -19,19 +24,23 @@ rather than gentle passivity.
 
 ## Goal
 
-A todo list that chases the user. It holds the full backlog (which the user intends to
-clear entirely), and its one job is to keep pushing the tasks the user is avoiding back
-into their face, ranked by how much they are being dodged. Everything else (the daily
-message, the nags) is a delivery mechanism for that push, in plain language.
+A todo list that chases the user. It holds the full backlog as the complete record, and
+its job is to push the user at what matters: chase the **vital few** (tasks that matter
+and are being dodged) and steer the **trivial many** toward the exit. Everything else
+(the daily message, the nags) is a delivery mechanism for that push, in plain language.
 
-This is **not** a "one focused thing a day" app. The user wants to complete the whole
-list, ordered by avoidance / importance / urgency, like any todo app. The single
-specific twist is that Jolt actively pushes the user at the thing(s) they keep avoiding
-instead of sitting there passively waiting.
+This is **not** a "one focused thing a day" app, but it is also **not** a "clear the
+whole list" app. Chasing the user to finish all 40 things is the exact overwhelm the
+Problem section names. Instead, Jolt pushes hard on the important-and-avoided tasks and
+periodically pressures low-value stale tasks toward being dropped, so the backlog
+shrinks by deletion as much as by completion. The full backlog stays visible as
+reference; what Jolt actively *pushes* is selective. (This walks back the "complete the
+whole list" language from the 2026-07-12 revision, which on reflection re-created the
+overwhelm the tool exists to break.)
 
-The "small daily surface" survives only as a **presentation** rule against overwhelm:
-lead with a few pushed items, never open with a wall of 40 lines. It is not a cap on
-how much the user may do in a day.
+The "small daily surface" survives as a **presentation** rule against overwhelm: lead
+with a few pushed items, never open with a wall of 40 lines. It is not a cap on how much
+the user may do in a day.
 
 ## Non-goals
 
@@ -95,16 +104,26 @@ question: *what should the bot shove in front of the user right now?*
   with **both** importance and age:
   - important + old → loud, blunt, top of the push.
   - normal + old → quiet, low priority, easy to wave off.
-- **Response: get curious first, then get louder** (user chose "A + B"):
-  1. On first flagging, the bot asks what is actually blocking the task and offers to
-     break it down or kill it: *"'Sort the insurance' has sat 4 days. What's actually
-     blocking it? Want to break it down or drop it?"*
-  2. If the user keeps dodging, the bot escalates: more frequent, blunter
-     (*"9 days now. It's a 2-minute call. Do it or delete it."*).
-- The "get curious" step and the importance weighting together guard against false
-  positives: a genuine "someday" task is both low-importance (quiet by default) and can
-  be waved off (*"nothing, it's a someday thing"*), after which the bot backs off
-  (de-prioritizes / stops escalating that task).
+- **Response: get curious first, then diverge by importance.** The bot always opens by
+  getting curious, but the curiosity leans differently depending on whether the task is
+  a frog or a tadpole:
+  1. **Important + old (the frog):** start-leaning. Ask what is actually blocking it and
+     offer to break it down: *"'Sort the insurance' has sat 4 days. What's actually
+     blocking it? Want to break it down?"* If the user keeps dodging, escalate: more
+     frequent, blunter (*"9 days now. It's a 2-minute call. Do it or delete it."*).
+  2. **Normal + old (the tadpole):** drop-leaning, a zero-based nudge: *"'X' has sat 12
+     days and hasn't moved. If it weren't already on the list, would you add it today?
+     Still want it?"* The framing trends toward dropping the task, not toward scheduling
+     it.
+- **Waving off does not mean permanent silence.** When a normal task is waved off, the
+  bot stops *chasing* it but does not forget it: it re-surfaces the zero-based question
+  on a **slow cadence** (governed by `last_nagged_at`, much lazier than a frog's nag
+  rhythm) until the user either acts on it or drops it. The bot never auto-parks or
+  auto-drops; every removal is the user's explicit call. This keeps the backlog honest
+  (nothing rots silently) while trending the trivial many toward the exit.
+- The importance weighting plus the drop-leaning framing guard against false positives:
+  a genuine "someday" task stays quiet (low-importance, slow cadence) and is easy to
+  drop when the zero-based question resurfaces it.
 
 ### Completion
 
@@ -195,9 +214,13 @@ TDD on the pure logic, which is where the real behavior lives:
 - Stale-detection rule (age boundary at exactly 3 days).
 - Daily-focus selection (importance / deadline / age tie-breaking; rescue selection is
   important-first among stale tasks; the ≤3 surfaced cap).
-- Nag/focus tone inputs: the prose prompts receive importance as well as age, so an
-  important + old task is pushed harder than a normal + old one (assert the importance
-  flag reaches the prompt; LLM wording itself is not asserted).
+- Nag/focus tone inputs: the prose prompts receive importance as well as age. Assert the
+  branch selection reaches the prompt: an important + old task gets the start-leaning
+  (break-it-down) framing signal, a normal + old task gets the drop-leaning (zero-based)
+  framing signal. LLM wording itself is not asserted.
+- Slow-cadence re-surface: a waved-off normal + old task re-appears after its (lazy)
+  cadence interval rather than going permanently silent, and a waved-off task is never
+  auto-dropped (status stays pending until an explicit drop).
 - Priority ordering for the backlog dump.
 - Quiet-hours enforcement (no ping scheduled or sent before 06:00 / after 23:00).
 
@@ -210,6 +233,9 @@ user.
 2. **Quiet hours = 06:00–23:00.**
 3. **Nag times = morning / midday / evening; daily focus at 06:00.**
 4. **Completion acknowledgment = plain and brief, no cheerleading.**
+5. **Slow re-surface cadence for waved-off normal + old tasks** (much lazier than the
+   3x-daily frog rhythm; exact interval is a single tunable constant, chosen in the
+   plan).
 
 ## Open items for the plan
 
