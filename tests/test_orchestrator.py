@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from jolt import db, orchestrator
 from jolt.llm import Intent
+from jolt.models import STATUS_DROPPED
 
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 12, 8, tzinfo=TZ)
@@ -160,3 +161,38 @@ def test_edit_intent_unknown_id_is_graceful():
         conn, Intent(action="edit", task_id=999, deadline=date(2026, 7, 12)), NOW
     )
     assert reply == "Couldn't find that one."
+
+
+def test_merge_folds_two_tasks_and_confirms():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "buy molds", "normal", None, now)
+    b = db.add_task(conn, "buy shower drain", "normal", None, now)
+    intent = Intent(action="merge", task_id=a.id, merge_from=b.id, text="buy molds and shower drain")
+    reply = orchestrator.apply_intent(conn, intent, now)
+    assert "buy molds and shower drain" in reply
+    assert db.get_task(conn, b.id).status == STATUS_DROPPED
+    assert db.get_task(conn, a.id).text == "buy molds and shower drain"
+
+
+def test_merge_falls_back_to_joined_text_when_claude_gives_none():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "buy molds", "normal", None, now)
+    b = db.add_task(conn, "buy shower drain", "normal", None, now)
+    intent = Intent(action="merge", task_id=a.id, merge_from=b.id, text=None)
+    orchestrator.apply_intent(conn, intent, now)
+    assert db.get_task(conn, a.id).text == "buy molds and buy shower drain"
+
+
+def test_merge_missing_task_reports_not_found():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "buy molds", "normal", None, now)
+    intent = Intent(action="merge", task_id=a.id, merge_from=9999, text="x")
+    reply = orchestrator.apply_intent(conn, intent, now)
+    assert reply == "Couldn't find those tasks."
+    assert db.get_task(conn, a.id).text == "buy molds"  # unchanged

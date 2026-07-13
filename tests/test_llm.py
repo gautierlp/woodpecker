@@ -628,3 +628,38 @@ def test_truncation_note_when_no_block_parses():
     assert len(intents) == 1
     assert intents[0].action == "answer"
     assert "too long" in intents[0].reply.lower()
+
+
+def test_parse_merge_with_merge_from():
+    intent = llm.parse_intent(
+        {"action": "merge", "task_id": 2, "merge_from": 5, "text": "combined task text"}
+    )
+    assert intent.action == "merge"
+    assert intent.task_id == 2
+    assert intent.merge_from == 5
+    assert intent.text == "combined task text"
+
+
+def test_tool_schema_supports_merge():
+    assert "merge" in llm._TOOL["input_schema"]["properties"]["action"]["enum"]
+    assert "merge_from" in llm._TOOL["input_schema"]["properties"]
+
+
+def test_resolve_positions_resolves_merge_from():
+    tasks = [_task(id=10), _task(id=20)]
+    display_ids = [10, 20]
+    intent = llm.Intent(action="merge", task_id=1, merge_from=2, text="combined")
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "merge"
+    assert resolved[0].task_id == 10
+    assert resolved[0].merge_from == 20
+
+
+def test_resolve_positions_out_of_range_merge_from_clarifies():
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(action="merge", task_id=1, merge_from=9, text="combined")
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "answer"
+    assert "9" in resolved[0].reply
+    assert resolved[0].merge_from is None

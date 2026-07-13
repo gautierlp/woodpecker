@@ -43,6 +43,7 @@ class Intent:
     deadline: date | None = None
     task_id: int | None = None
     blocked_by: int | None = None
+    merge_from: int | None = None
     reply: str | None = None
     clear_deadline: bool = False
 
@@ -56,6 +57,7 @@ def parse_intent(tool_input: dict) -> Intent:
         deadline=date.fromisoformat(deadline) if deadline else None,
         task_id=tool_input.get("task_id"),
         blocked_by=tool_input.get("blocked_by"),
+        merge_from=tool_input.get("merge_from"),
         reply=tool_input.get("reply"),
         clear_deadline=tool_input.get("clear_deadline", False),
     )
@@ -71,8 +73,8 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "complete", "drop", "edit", "block", "unblock", "list", "answer"],
-                "description": "add a task, complete/drop an existing one, edit an existing task's deadline/priority/text, block a task on another / unblock it, list the backlog, or answer a question / reply to the user.",
+                "enum": ["add", "complete", "drop", "edit", "block", "unblock", "merge", "list", "answer"],
+                "description": "add a task, complete/drop an existing one, edit an existing task's deadline/priority/text, block a task on another / unblock it, merge two tasks into one, list the backlog, or answer a question / reply to the user.",
             },
             "text": {"type": "string", "description": "Task text, for action=add."},
             "priority": {
@@ -93,6 +95,11 @@ _TOOL = {
                 "type": "integer",
                 "description": "For action=block: the backlog number of the prerequisite task "
                 "that must be finished first.",
+            },
+            "merge_from": {
+                "type": "integer",
+                "description": "For action=merge: the backlog number of the task to fold into "
+                "task_id. task_id is the task that remains; put the combined text in the text field.",
             },
             "reply": {
                 "type": "string",
@@ -157,7 +164,9 @@ def _resolve_positions(
     resolved = []
     for intent in intents:
         missing = [
-            n for n in (intent.task_id, intent.blocked_by) if n is not None and n not in pos_to_id
+            n
+            for n in (intent.task_id, intent.blocked_by, intent.merge_from)
+            if n is not None and n not in pos_to_id
         ]
         if missing:
             numbers = " or ".join(str(n) for n in missing)
@@ -170,6 +179,7 @@ def _resolve_positions(
                     "Send 'list' to see the current numbers.",
                     task_id=None,
                     blocked_by=None,
+                    merge_from=None,
                 )
             )
             continue
@@ -178,6 +188,8 @@ def _resolve_positions(
             changes["task_id"] = pos_to_id[intent.task_id]
         if intent.blocked_by is not None:
             changes["blocked_by"] = pos_to_id[intent.blocked_by]
+        if intent.merge_from is not None:
+            changes["merge_from"] = pos_to_id[intent.merge_from]
         resolved.append(replace(intent, **changes) if changes else intent)
     return resolved
 
@@ -195,18 +207,25 @@ def interpret_message(
         "You are Jolt, a personal accountability bot. Read the user's message and record "
         "what it means by calling record_intent. A single message can contain several things "
         "at once (for example a pasted list of tasks); call record_intent once per distinct "
-        "task or action, never fold several tasks into one. When adding a task, judge its "
+        "task or action. When adding tasks, never fold several into one add; but when the user "
+        "explicitly asks to combine or group existing tasks, use action=merge (see below). "
+        "When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. In the backlog below each "
         "task is listed as 'number: text', where the number is what the user sees. To act on a "
         "task (complete, drop, edit, block), pass that exact number as task_id (and as "
         "blocked_by for a prerequisite): the user's '2' in 'complete 2' or '34 blocks 35' is "
-        "that number. When the user names a task by its text instead of a number, find the "
-        "matching line and use its number. When the user says one task must "
+        "that number. When the user describes a task in words rather than typing a number, match it to the "
+        "backlog line by its text and use that line's number; only treat a bare number as task_id "
+        "when the user actually typed that number. When the user says one task must "
         "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
         "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
         "the prerequisite task's number; emit one block call per blocked task. To lift a dependency, use "
         "action=unblock with the task_id. "
+        "When the user asks to combine, group, or merge two tasks, or says two entries are really "
+        "the same task, call record_intent with action=merge: task_id = the task to keep, "
+        "merge_from = the other task's number, and text = the combined text for the kept task. "
+        "Only merge when they ask to combine existing tasks, not when they describe a dependency. "
         "To change an existing task rather than add a new one, use action=edit with its task_id "
         "and only the fields that change: a new deadline, a new priority (normal/important), or "
         "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. To "
@@ -221,6 +240,11 @@ def interpret_message(
         "write in any language, but always store the task text in English (translate it if needed). "
         "Never use an em dash (the '—' character) in your reply. Use a comma, a colon, or a period "
         "instead. This rule has no exceptions. "
+        "Vocabulary: the user's 'frog' is the single most important thing to do today, the one "
+        "lead task to hit first; a 'tadpole' is a low-value task that has been sitting and is a "
+        "candidate to drop rather than chase. When the user asks what their frog is or what they "
+        "should do today, answer with action=answer, naming the task from the backlog that best "
+        "fits (lead with the most important, and prefer one that has gone stale). "
         f"Today is {now:%A, %Y-%m-%d}. Resolve any relative deadline (today, tomorrow, next "
         "week, in 3 days) against today's date and record it as an ISO YYYY-MM-DD date. "
     )

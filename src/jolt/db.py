@@ -1,7 +1,14 @@
 import sqlite3
 from datetime import date, datetime
 
-from .models import STATUS_DONE, STATUS_DROPPED, STATUS_PENDING, Task
+from .models import (
+    PRIORITY_IMPORTANT,
+    PRIORITY_NORMAL,
+    STATUS_DONE,
+    STATUS_DROPPED,
+    STATUS_PENDING,
+    Task,
+)
 
 _UNSET = object()
 
@@ -168,6 +175,43 @@ def unblock_task(conn, task_id: int) -> Task | None:
     )
     conn.commit()
     return get_task(conn, task_id) if cur.rowcount else None
+
+
+def _merge_deadline(a: date | None, b: date | None) -> date | None:
+    # The more urgent of two deadlines: a real date always beats "no deadline".
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
+def merge_tasks(conn, survivor_id: int, from_id: int, text: str) -> Task | None:
+    """Fold from_id into survivor_id, then drop from_id. The survivor keeps its id, age,
+    and last_nagged_at; it takes the given text, the earlier deadline of the two, and the
+    higher priority (important beats normal). Returns the updated survivor, or None if the
+    two ids are equal or either task is missing or not pending."""
+    if survivor_id == from_id:
+        return None
+    survivor = get_task(conn, survivor_id)
+    other = get_task(conn, from_id)
+    if survivor is None or survivor.status != STATUS_PENDING:
+        return None
+    if other is None or other.status != STATUS_PENDING:
+        return None
+    deadline = _merge_deadline(survivor.deadline, other.deadline)
+    priority = (
+        PRIORITY_IMPORTANT
+        if PRIORITY_IMPORTANT in (survivor.priority, other.priority)
+        else PRIORITY_NORMAL
+    )
+    conn.execute(
+        "UPDATE tasks SET text = ?, deadline = ?, priority = ? WHERE id = ?",
+        (text, deadline.isoformat() if deadline else None, priority, survivor_id),
+    )
+    conn.commit()
+    drop_task(conn, from_id)  # clears any dangling blocked_by references to the dropped task
+    return get_task(conn, survivor_id)
 
 
 def mark_nagged(conn, task_id: int, when: datetime) -> None:

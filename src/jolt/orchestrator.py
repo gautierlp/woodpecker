@@ -99,6 +99,23 @@ def apply_intent(conn, intent: Intent, now: datetime) -> str:
         task = db.unblock_task(conn, intent.task_id)
         logger.info("Unblock task_id=%s: %s", intent.task_id, "ok" if task else "not found")
         return "Unblocked." if task else "Couldn't find that one."
+    if intent.action == "merge":
+        if intent.task_id == intent.merge_from:
+            return "Can't merge a task with itself."
+        survivor = db.get_task(conn, intent.task_id)
+        other = db.get_task(conn, intent.merge_from)
+        if (
+            survivor is None
+            or survivor.status != STATUS_PENDING
+            or other is None
+            or other.status != STATUS_PENDING
+        ):
+            logger.info("Merge rejected: could not find both pending tasks")
+            return "Couldn't find those tasks."
+        text = intent.text or f"{survivor.text} and {other.text}"
+        merged = db.merge_tasks(conn, intent.task_id, intent.merge_from, text)
+        logger.info("Merged task_id=%s from %s", intent.task_id, intent.merge_from)
+        return f'Merged into "{merged.text}".'
     if intent.action == "list":
         return render_backlog(db.list_all(conn), now)
     return intent.reply or "Not sure what you mean. Try rephrasing?"

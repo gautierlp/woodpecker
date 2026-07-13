@@ -302,3 +302,49 @@ def test_block_still_works_for_valid_input():
     result = db.block_task(conn, b.id, a.id)
     assert result is not None
     assert result.blocked_by == a.id
+
+
+def test_merge_takes_earlier_deadline_and_higher_priority_and_drops_other():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    survivor = db.add_task(conn, "buy molds", PRIORITY_NORMAL, None, now)
+    other = db.add_task(conn, "buy shower drain", PRIORITY_IMPORTANT, date(2026, 7, 17), now)
+    merged = db.merge_tasks(conn, survivor.id, other.id, "buy molds and shower drain")
+    assert merged is not None
+    assert merged.id == survivor.id
+    assert merged.text == "buy molds and shower drain"
+    assert merged.deadline == date(2026, 7, 17)  # the only / earlier deadline wins
+    assert merged.priority == PRIORITY_IMPORTANT  # important beats normal
+    assert merged.created_at == survivor.created_at  # survivor keeps its age
+    assert db.get_task(conn, other.id).status == STATUS_DROPPED
+
+
+def test_merge_keeps_the_sooner_of_two_deadlines():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "a", PRIORITY_NORMAL, date(2026, 7, 20), now)
+    b = db.add_task(conn, "b", PRIORITY_NORMAL, date(2026, 7, 15), now)
+    merged = db.merge_tasks(conn, a.id, b.id, "a and b")
+    assert merged.deadline == date(2026, 7, 15)
+
+
+def test_merge_rejects_self_merge():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "a", PRIORITY_NORMAL, None, now)
+    assert db.merge_tasks(conn, t.id, t.id, "a") is None
+
+
+def test_merge_rejects_missing_or_done_task():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "a", PRIORITY_NORMAL, None, now)
+    b = db.add_task(conn, "b", PRIORITY_NORMAL, None, now)
+    db.complete_task(conn, b.id, now)  # b no longer pending
+    assert db.merge_tasks(conn, a.id, b.id, "a and b") is None
+    assert db.merge_tasks(conn, a.id, 9999, "a and gone") is None
+    assert db.get_task(conn, a.id).text == "a"  # survivor untouched on rejection
