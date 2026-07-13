@@ -394,6 +394,24 @@ def test_write_nag_returns_text():
     assert "taxes" in out
 
 
+def test_write_nag_important_is_start_leaning():
+    # An important task's nag pushes toward starting: ask what is blocking it / break it down.
+    text_block = SimpleNamespace(type="text", text="go")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    llm.write_nag(_important_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "blocking" in system or "break it down" in system
+
+
+def test_write_nag_normal_is_drop_leaning():
+    # A low-value task's nag leans toward dropping it with a zero-based question, not scheduling it.
+    text_block = SimpleNamespace(type="text", text="go")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    llm.write_nag(_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "drop" in system or "still want" in system or "add it today" in system
+
+
 def test_parse_block_intent():
     intent = llm.parse_intent({"action": "block", "task_id": 1, "blocked_by": 3})
     assert intent.action == "block"
@@ -504,3 +522,14 @@ def test_interpret_message_maps_bulk_reschedule_to_edit_per_task():
         ("edit", 1, date(2026, 7, 12)),
         ("edit", 2, date(2026, 7, 12)),
     ]
+
+
+def test_write_focus_leans_drop_for_low_value_rescue():
+    # A normal (low-value) rescue should be framed as "still worth keeping?", not
+    # "what is blocking it?", so the morning digest matches the drop-leaning nag stance.
+    text_block = SimpleNamespace(type="text", text="ok")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    focus = DailyFocus(focus=_important_task(1), rescues=[_task(2)])  # _task is normal
+    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "drop" in system or "worth keeping" in system or "still want" in system

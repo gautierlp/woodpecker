@@ -22,6 +22,7 @@ def make(
     created=NOW,
     status=STATUS_PENDING,
     blocked_by=None,
+    nagged=None,
 ):
     return Task(
         id=id,
@@ -30,7 +31,7 @@ def make(
         deadline=deadline,
         created_at=created,
         status=status,
-        last_nagged_at=None,
+        last_nagged_at=nagged,
         completed_at=None,
         blocked_by=blocked_by,
     )
@@ -155,3 +156,51 @@ def test_blocked_task_is_not_a_rescue():
     stale_dep = make(2, created=NOW - timedelta(days=5), blocked_by=1)
     result = selection.select_daily_focus([blocker, stale_dep], NOW)
     assert 2 not in [t.id for t in result.rescues]
+
+
+def test_nag_stance_start_for_important():
+    assert selection.nag_stance(make(1, priority=PRIORITY_IMPORTANT)) == "start"
+
+
+def test_nag_stance_drop_for_normal():
+    assert selection.nag_stance(make(1, priority=PRIORITY_NORMAL)) == "drop"
+
+
+def test_slow_resurface_picks_normal_stale_task():
+    t = make(1, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([t], NOW).id == 1
+
+
+def test_slow_resurface_none_when_nothing_eligible():
+    fresh = make(1, created=NOW)  # not stale
+    important = make(2, priority=PRIORITY_IMPORTANT, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([fresh, important], NOW) is None
+
+
+def test_slow_resurface_excludes_focus_id():
+    focus = make(1, created=NOW - timedelta(days=5))
+    other = make(2, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([focus, other], NOW, exclude_id=1).id == 2
+
+
+def test_slow_resurface_gated_within_cadence():
+    recent = make(1, created=NOW - timedelta(days=10), nagged=NOW - timedelta(days=2))
+    assert selection.select_slow_resurface([recent], NOW) is None
+
+
+def test_slow_resurface_eligible_after_cadence():
+    old = make(1, created=NOW - timedelta(days=30), nagged=NOW - timedelta(days=8))
+    assert selection.select_slow_resurface([old], NOW).id == 1
+
+
+def test_slow_resurface_prefers_never_nagged():
+    never = make(1, created=NOW - timedelta(days=5))
+    nagged_long_ago = make(2, created=NOW - timedelta(days=20), nagged=NOW - timedelta(days=10))
+    assert selection.select_slow_resurface([never, nagged_long_ago], NOW).id == 1
+
+
+def test_slow_resurface_ignores_blocked_task():
+    blocker = make(1, created=NOW - timedelta(days=5))
+    dep = make(2, created=NOW - timedelta(days=5), blocked_by=1)
+    # exclude the blocker as the focus; the only other candidate (dep) is blocked -> None
+    assert selection.select_slow_resurface([blocker, dep], NOW, exclude_id=1) is None

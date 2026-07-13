@@ -102,3 +102,31 @@ def test_nag_sends_and_marks_nagged():
     scheduler.send_nags(conn, send, FakeClient(), now)
     assert len(sent) == 1
     assert db.get_task(conn, t.id).last_nagged_at == now
+
+
+def test_slow_resurface_nags_a_normal_stale_nonfocus_task():
+    # An important stale task is the focus (frog). A separate normal stale task should
+    # also get a slow-resurface poke, so two messages go out and the tadpole is marked.
+    conn = fresh()
+    created = datetime(2026, 7, 5, tzinfo=TZ)  # 7 days before `now`
+    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+    db.add_task(conn, "file taxes", "important", None, created)  # id 1, becomes focus
+    tad = db.add_task(conn, "sort old photos", "normal", None, created)  # id 2, tadpole
+    sent, send = collector()
+    scheduler.send_nags(conn, send, FakeClient(), now)
+    assert len(sent) == 2
+    assert db.get_task(conn, tad.id).last_nagged_at == now
+
+
+def test_slow_resurface_gated_by_cadence():
+    # The tadpole was poked yesterday, well within SLOW_RESURFACE_DAYS, so only the
+    # frog nag goes out this run.
+    conn = fresh()
+    created = datetime(2026, 7, 1, tzinfo=TZ)
+    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+    db.add_task(conn, "file taxes", "important", None, created)  # focus
+    tad = db.add_task(conn, "sort old photos", "normal", None, created)
+    db.mark_nagged(conn, tad.id, datetime(2026, 7, 11, 13, tzinfo=TZ))  # poked yesterday
+    sent, send = collector()
+    scheduler.send_nags(conn, send, FakeClient(), now)
+    assert len(sent) == 1

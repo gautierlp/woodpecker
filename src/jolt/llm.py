@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from . import config, render
 from .models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
+from .selection import nag_stance
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +251,10 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
     system = (
         "You are Jolt. Write a short morning message (2 to 4 lines, no em dashes). Lead with the "
         "one focus task as the single thing to hit today, and push harder on important tasks than "
-        "low-stakes ones. If there are rescue tasks that have gone stale, mention them and ask what "
-        "is blocking them. Be plain and direct, never guilt-tripping."
+        "low-stakes ones. If there are rescue tasks that have gone stale, mention them: for an "
+        "important rescue ask what is blocking it, but for a low-stakes (normal) rescue lean the "
+        "other way and ask whether it is still worth keeping or should just be dropped. Be plain "
+        "and direct, never guilt-tripping."
     )
     user = f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)}). Rescues: {rescues}."
     response = client.messages.create(
@@ -266,14 +269,30 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
 
 def write_nag(task: Task, now: datetime, client) -> str:
     age = (now - task.created_at).days
+    stance = nag_stance(task)
+    if stance == "start":
+        guidance = (
+            "This task matters. Push toward starting it: first ask what is actually blocking "
+            "it and offer to break it down into a small first step. The older it is and the "
+            "later in the day, the blunter and more insistent you get, up to a flat 'do it or "
+            "delete it' by evening."
+        )
+    else:
+        guidance = (
+            "This task is low-stakes and has been sitting untouched. Do not chase it to get "
+            "done. Instead nudge toward dropping it with a zero-based question: if it were not "
+            "already on the list, would they add it today? Still want it, or drop it? Stay "
+            "light and easy to wave off."
+        )
     system = (
         "You are Jolt. Write one short nag (1 to 2 lines, no em dashes) about the task below. "
-        "Push harder the more important the task is, the older it is, and the later in the day it "
-        "is: an important task dodged for days gets blunt and insistent by evening; a normal, "
-        "low-stakes task stays gentle and easy to wave off. If it is several days old, first ask "
-        "what is actually blocking it before pushing. Never guilt-trip."
+        + guidance
+        + " Never guilt-trip."
     )
-    user = f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. Current hour: {now.hour}."
+    user = (
+        f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. "
+        f"Current hour: {now.hour}."
+    )
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=200,

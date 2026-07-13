@@ -3,6 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 STALE_THRESHOLD_DAYS = 3
+SLOW_RESURFACE_DAYS = 7  # a waved-off normal, stale task is re-poked at most once this often
 DUE_SOON_DAYS = 2  # a deadline this close (or past) counts as urgent
 QUIET_START_HOUR = 6  # first hour of the day pings are allowed
 QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
