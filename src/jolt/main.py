@@ -2,7 +2,7 @@ import logging
 import os
 
 from anthropic import Anthropic
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -43,6 +43,28 @@ def _make_send(application, chat_id):
     return send
 
 
+def build_scheduler(conn, send, client) -> AsyncIOScheduler:
+    """Build the cron scheduler for the daily focus and nags.
+
+    The jobs are coroutines on purpose: AsyncIOScheduler runs coroutine jobs on the
+    bot's own asyncio event loop, the same thread that owns `conn` and the Telegram
+    send. A BackgroundScheduler with plain sync jobs ran them on a worker thread
+    instead, where the SQLite connection is unusable and there is no running loop for
+    the send, so every scheduled message crashed silently."""
+    sched = AsyncIOScheduler(timezone=config.TIMEZONE)
+
+    async def _daily_focus():
+        scheduler.send_daily_focus(conn, send, client, config.now_paris())
+
+    async def _nags():
+        scheduler.send_nags(conn, send, client, config.now_paris())
+
+    sched.add_job(_daily_focus, CronTrigger(hour=config.DAILY_FOCUS_HOUR, minute=0))
+    for nag_hour in config.NAG_HOURS:
+        sched.add_job(_nags, CronTrigger(hour=nag_hour, minute=0))
+    return sched
+
+
 def main() -> None:
     setup_logging()
     logger.info("Starting Jolt")
@@ -56,32 +78,31 @@ def main() -> None:
         "Configured for chat_id=%s, model=%s, timezone=%s", chat_id, config.MODEL, config.TIMEZONE
     )
 
-    application = Application.builder().token(config.telegram_token()).build()
     memory = ConversationMemory()
+
+    async def _post_init(application) -> None:
+        # Runs once the event loop is up. Build the send and start the scheduler here so
+        # AsyncIOScheduler binds to the bot's running loop: the jobs then execute on the
+        # same thread that owns `conn` and the Telegram send.
+        send = bot.make_recording_send(_make_send(application, chat_id), memory, chat_id)
+        sched = build_scheduler(conn, send, client)
+        sched.start()
+        application.bot_data["scheduler"] = sched
+        logger.info(
+            "Scheduler started: daily focus at %02d:00, nags at %s",
+            config.DAILY_FOCUS_HOUR,
+            ", ".join(f"{h:02d}:00" for h in config.NAG_HOURS),
+        )
+
+    application = (
+        Application.builder().token(config.telegram_token()).post_init(_post_init).build()
+    )
     application.bot_data.update(
         {"conn": conn, "client": client, "chat_id": chat_id, "memory": memory}
     )
     application.add_handler(CommandHandler("start", bot.handle_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
     application.add_error_handler(bot.handle_error)
-
-    send = bot.make_recording_send(_make_send(application, chat_id), memory, chat_id)
-    sched = BackgroundScheduler(timezone=config.TIMEZONE)
-    sched.add_job(
-        lambda: scheduler.send_daily_focus(conn, send, client, config.now_paris()),
-        CronTrigger(hour=config.DAILY_FOCUS_HOUR, minute=0),
-    )
-    for nag_hour in config.NAG_HOURS:
-        sched.add_job(
-            lambda: scheduler.send_nags(conn, send, client, config.now_paris()),
-            CronTrigger(hour=nag_hour, minute=0),
-        )
-    sched.start()
-    logger.info(
-        "Scheduler started: daily focus at %02d:00, nags at %s",
-        config.DAILY_FOCUS_HOUR,
-        ", ".join(f"{h:02d}:00" for h in config.NAG_HOURS),
-    )
 
     logger.info("Starting Telegram polling")
     application.run_polling()

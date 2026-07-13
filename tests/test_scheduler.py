@@ -1,7 +1,10 @@
+import inspect
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from jolt import db, scheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from jolt import config, db, main, scheduler
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -58,6 +61,22 @@ def test_nags_skipped_when_no_pending_task():
     sent, send = collector()
     scheduler.send_nags(conn, send, FakeClient(), now)
     assert sent == []
+
+
+def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
+    """Regression for the silent 6am brief: BackgroundScheduler ran the jobs on a
+    worker thread, where the bot's SQLite connection is unusable ("SQLite objects
+    created in a thread can only be used in that same thread") and there is no event
+    loop for the Telegram send. The scheduler must be an AsyncIOScheduler and every
+    job a coroutine, so APScheduler runs them on the bot's own event-loop thread."""
+    conn = fresh()
+    sent, send = collector()
+    sched = main.build_scheduler(conn, send, FakeClient())
+    assert isinstance(sched, AsyncIOScheduler)
+    jobs = sched.get_jobs()
+    assert len(jobs) == 1 + len(config.NAG_HOURS)
+    for job in jobs:
+        assert inspect.iscoroutinefunction(job.func), f"{job.func} must be a coroutine"
 
 
 def test_nag_sends_and_marks_nagged():
