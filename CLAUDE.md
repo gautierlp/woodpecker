@@ -9,7 +9,7 @@ Private single-user project, not a SaaS. Built to break a specific personal loop
 
 **Status: deployed and running.** All 10 plan tasks are done: the full app
 (bot, LLM, tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy
-workflow. 40 tests pass. Live on `jarvis` as the `jolt` container (bot
+workflow. 182 tests pass. Live on `jarvis` as the `jolt` container (bot
 `@jolt_todo_bot`), with the self-hosted runner `gh-runner-jolt` auto-deploying on push
 to `main`. The SQLite file lives in the bind-mounted `./data`. See
 `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for the full behavior,
@@ -62,23 +62,29 @@ Key libraries:
 - Behavior tunables (stale threshold = 3 days, quiet hours = 06:00 to 23:00) are single
   named constants, easy to change after living with the bot.
 
-## Module Responsibilities (planned)
+## Module Responsibilities
 
-Layout to be finalized in the implementation plan, following the `billie_bot` shape:
+Following the `billie_bot` shape:
 
 ```
-src/
-  main.py       Entry point: wires up bot + scheduler, starts the app
-  bot.py        Telegram handler: receives messages, sends replies and nags
-  llm.py        Anthropic client: interprets messages, classifies intent, writes text
-  tasks.py      Backlog logic: add/complete/drop, priority ordering, backlog dump
-  staleness.py  Pure rules: stale detection (age), daily-focus selection
-  scheduler.py  APScheduler jobs: 06:00 focus, midday/evening nags, daily stale-scan
-  db.py         SQLite access: the single tasks table
+src/jolt/
+  main.py         Entry point: wires up bot + scheduler, builds the client, starts the app
+  bot.py          Telegram handler: receives messages, sends replies and nags
+  llm.py          Anthropic client: interprets messages, classifies intent, writes text
+  orchestrator.py Applies a parsed intent to the backlog and returns the reply text
+  selection.py    Pure rules: stale detection, daily-focus selection, slow-resurface, quiet hours
+  render.py       Deterministic backlog rendering and display ordering
+  memory.py       In-process recent-conversation and pending-outbound memory per chat
+  scheduler.py    Job bodies: daily focus and nags (wired to APScheduler cron in main.py)
+  db.py           SQLite access: the tasks table and the display_snapshot table
+  models.py       Task and DailyFocus dataclasses and the status/priority constants
+  config.py       Named tunables and environment readers
 ```
 
-Data model (single `tasks` table): `id`, `text`, `priority`, `deadline`, `created_at`,
-`status` (pending/done/dropped), `last_nagged_at`, `completed_at`.
+Data model has two tables. The `tasks` table: `id`, `text`, `priority`, `deadline`,
+`created_at`, `status` (pending/done/dropped), `last_nagged_at`, `completed_at`,
+`blocked_by`. The `display_snapshot` table holds one row per chat: the ordered task
+ids of the last list shown.
 
 ## Development
 

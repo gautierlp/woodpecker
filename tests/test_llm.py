@@ -86,6 +86,10 @@ def _ordered_task(id, day):
 NOW = datetime(2026, 7, 12, 15, tzinfo=TZ)
 
 
+def _tool_use(input_dict):
+    return SimpleNamespace(type="tool_use", input=input_dict)
+
+
 def test_interpret_message_returns_parsed_intent():
     tool_block = SimpleNamespace(
         type="tool_use", name="record_intent", input={"action": "add", "text": "call vet"}
@@ -187,16 +191,17 @@ def test_prompt_drops_snapshot_task_that_is_no_longer_pending():
     assert "2: task 46" in system
 
 
-def test_interpret_message_out_of_range_position_resolves_to_not_found():
-    # A number past the end of the list must fail cleanly (id becomes None -> "couldn't
-    # find") rather than silently landing on some unrelated task that happens to have
-    # that id.
+def test_interpret_message_out_of_range_position_becomes_clarification():
+    # An out-of-range number (past the end of the list) is converted to an action="answer"
+    # clarification asking the user to resend with a valid position, rather than silently
+    # landing on some unrelated task or creating a confused state.
     tasks = [_ordered_task(7, 1)]
     complete = SimpleNamespace(
         type="tool_use", name="record_intent", input={"action": "complete", "task_id": 9}
     )
     client = FakeClient(SimpleNamespace(content=[complete]))
     intents = llm.interpret_message("done 9", tasks, NOW, client)
+    assert intents[0].action == "answer"
     assert intents[0].task_id is None
 
 
@@ -394,6 +399,26 @@ def test_write_nag_returns_text():
     assert "taxes" in out
 
 
+def test_out_of_range_number_becomes_a_clarification():
+    tasks = [_task(id=10)]
+    display_ids = [10]  # only position 1 exists
+    intent = llm.Intent(action="complete", task_id=45)  # user referenced "45"
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert len(resolved) == 1
+    assert resolved[0].action == "answer"
+    assert "45" in resolved[0].reply
+    assert resolved[0].task_id is None
+
+
+def test_in_range_number_still_resolves_to_its_id():
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(action="complete", task_id=1)  # position 1 -> id 10
+    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    assert resolved[0].action == "complete"
+    assert resolved[0].task_id == 10
+
+
 def test_write_nag_important_is_start_leaning():
     # An important task's nag pushes toward starting: ask what is blocking it / break it down.
     text_block = SimpleNamespace(type="text", text="go")
@@ -533,3 +558,73 @@ def test_write_focus_leans_drop_for_low_value_rescue():
     llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
     system = client.messages.calls[0]["system"].lower()
     assert "drop" in system or "worth keeping" in system or "still want" in system
+
+
+def test_text_of_falls_back_when_no_text_block():
+    # A response whose content has no text block (refusal / truncation) must not yield "",
+    # because Telegram rejects an empty message and the send would raise.
+    response = SimpleNamespace(content=[], stop_reason="end_turn")
+    assert llm._text_of(response) != ""
+
+
+def test_build_client_sets_a_short_timeout():
+    from jolt import config, llm
+
+    client = llm.build_client("sk-test-not-a-real-key")
+    assert client.timeout == config.ANTHROPIC_TIMEOUT_SECONDS
+    assert config.ANTHROPIC_TIMEOUT_SECONDS <= 60
+
+
+def test_tool_schema_is_strict():
+    assert llm._TOOL["strict"] is True
+    assert llm._TOOL["input_schema"]["additionalProperties"] is False
+
+
+def test_one_malformed_block_does_not_drop_the_others():
+    # Two intents: a valid add, and a block with a non-ISO date that would crash parse_intent.
+    # The valid add must survive; the bad block becomes a clarification, not a total failure.
+    response = SimpleNamespace(
+        content=[
+            _tool_use({"action": "add", "text": "buy milk"}),
+            _tool_use({"action": "add", "text": "call bank", "deadline": "next week"}),
+        ],
+        stop_reason="tool_use",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=10),
+    )
+    intents = llm.interpret_message(
+        "buy milk; call bank next week", [_task()], datetime(2026, 7, 13, tzinfo=TZ),
+        FakeClient(response),
+    )
+    actions = [i.action for i in intents]
+    assert "add" in actions  # the valid one survived
+    # the malformed one degraded to an answer, not a raised exception
+    assert any(i.action == "answer" for i in intents)
+
+
+def test_truncated_response_appends_a_note():
+    response = SimpleNamespace(
+        content=[_tool_use({"action": "add", "text": "task one"})],
+        stop_reason="max_tokens",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=10),
+    )
+    intents = llm.interpret_message(
+        "a very long paste", [_task()], datetime(2026, 7, 13, tzinfo=TZ), FakeClient(response),
+    )
+    assert intents[-1].action == "answer"
+    assert "too long" in intents[-1].reply.lower()
+
+
+def test_truncation_note_when_no_block_parses():
+    # When a response is truncated (stop_reason="max_tokens") and no tool_use blocks parse,
+    # the user must still get the "too long" message, not just "Sorry, I did not catch that."
+    response = SimpleNamespace(
+        content=[],
+        stop_reason="max_tokens",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=10),
+    )
+    intents = llm.interpret_message(
+        "a very long unparseable paste", [_task()], datetime(2026, 7, 13, tzinfo=TZ), FakeClient(response),
+    )
+    assert len(intents) == 1
+    assert intents[0].action == "answer"
+    assert "too long" in intents[0].reply.lower()

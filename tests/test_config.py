@@ -30,3 +30,19 @@ def test_task_and_focus_construct():
     focus = DailyFocus(focus=t, rescues=[])
     assert focus.focus.text == "call vet"
     assert focus.rescues == []
+
+
+def test_db_path_defaults_when_unset(monkeypatch):
+    from jolt import config
+
+    monkeypatch.delenv("JOLT_DB_PATH", raising=False)
+    assert config.db_path() == "data/jolt.db"
+
+
+def test_log_level_defaults_to_info_and_uppercases(monkeypatch):
+    from jolt import config
+
+    monkeypatch.delenv("JOLT_LOG_LEVEL", raising=False)
+    assert config.log_level() == "INFO"
+    monkeypatch.setenv("JOLT_LOG_LEVEL", "debug")
+    assert config.log_level() == "DEBUG"

@@ -2,11 +2,20 @@ import logging
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 
+from anthropic import Anthropic
+
 from . import config, render
 from .models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
 from .selection import nag_stance
 
 logger = logging.getLogger(__name__)
+
+
+def build_client(api_key: str) -> Anthropic:
+    """The Anthropic client, with an explicit short timeout. Calls run on the bot's single
+    event loop, so without a tight timeout one hung request would freeze polling and every
+    scheduled job for the SDK's ~10-minute default."""
+    return Anthropic(api_key=api_key, timeout=config.ANTHROPIC_TIMEOUT_SECONDS)
 
 
 def _log_usage(label: str, response) -> None:
@@ -55,8 +64,10 @@ def parse_intent(tool_input: dict) -> Intent:
 _TOOL = {
     "name": "record_intent",
     "description": "Record what the user's Telegram message means for their task list.",
+    "strict": True,
     "input_schema": {
         "type": "object",
+        "additionalProperties": False,
         "properties": {
             "action": {
                 "type": "string",
@@ -145,11 +156,28 @@ def _resolve_positions(
         pos_to_id = {pos: tid for pos, tid in enumerate(display_ids, 1)}
     resolved = []
     for intent in intents:
+        missing = [
+            n for n in (intent.task_id, intent.blocked_by) if n is not None and n not in pos_to_id
+        ]
+        if missing:
+            numbers = " or ".join(str(n) for n in missing)
+            logger.warning("Task number(s) %s not on the last list shown; asking to clarify", missing)
+            resolved.append(
+                replace(
+                    intent,
+                    action="answer",
+                    reply=f"I don't have a task numbered {numbers} on the current list. "
+                    "Send 'list' to see the current numbers.",
+                    task_id=None,
+                    blocked_by=None,
+                )
+            )
+            continue
         changes = {}
         if intent.task_id is not None:
-            changes["task_id"] = pos_to_id.get(intent.task_id)
+            changes["task_id"] = pos_to_id[intent.task_id]
         if intent.blocked_by is not None:
-            changes["blocked_by"] = pos_to_id.get(intent.blocked_by)
+            changes["blocked_by"] = pos_to_id[intent.blocked_by]
         resolved.append(replace(intent, **changes) if changes else intent)
     return resolved
 
@@ -212,7 +240,7 @@ def interpret_message(
     )
     response = client.messages.create(
         model=config.MODEL,
-        max_tokens=1000,
+        max_tokens=config.INTERPRET_MAX_TOKENS,
         system=system,
         tools=[_TOOL],
         # "any" forces at least one record_intent call but, unlike naming the tool,
@@ -221,23 +249,43 @@ def interpret_message(
         messages=messages,
     )
     _log_usage("interpret_message", response)
-    intents = [
-        parse_intent(block.input)
-        for block in response.content
-        if getattr(block, "type", None) == "tool_use"
-    ]
+    intents = []
+    for block in response.content:
+        if getattr(block, "type", None) != "tool_use":
+            continue
+        try:
+            intents.append(parse_intent(block.input))
+        except (ValueError, KeyError, TypeError) as exc:
+            # One malformed block (a non-ISO date, a missing field) must not sink the rest of
+            # a multi-task message. Degrade just this item to a clarification.
+            logger.warning("Could not parse an intent block (%s): %r", exc, block.input)
+            intents.append(
+                Intent(action="answer", reply="I couldn't make sense of part of that. Try rephrasing it?")
+            )
+    truncated = getattr(response, "stop_reason", None) == "max_tokens"
+    if truncated:
+        logger.warning("interpret_message hit max_tokens; response may be truncated")
     if not intents:
+        if truncated:
+            return [Intent(action="answer", reply=_TRUNCATION_NOTE)]
         logger.warning("Claude returned no tool_use block; falling back to clarification reply")
         return [Intent(action="answer", reply="Sorry, I did not catch that. Try again?")]
     intents = _resolve_positions(intents, display_ids, tasks, now)
+    if truncated:
+        intents.append(Intent(action="answer", reply=_TRUNCATION_NOTE))
     return intents
+
+
+_TRUNCATION_NOTE = "That message was too long for me to capture all at once. Please re-send anything that didn't land."
+_EMPTY_REPLY_FALLBACK = "I hit a snag putting that into words. Try me again in a moment."
 
 
 def _text_of(response) -> str:
     for block in response.content:
         if getattr(block, "type", None) == "text":
             return block.text
-    return ""
+    logger.warning("Claude returned no text block; using fallback text")
+    return _EMPTY_REPLY_FALLBACK
 
 
 def write_focus(focus: DailyFocus, now: datetime, client) -> str:

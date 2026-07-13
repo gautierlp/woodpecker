@@ -121,6 +121,14 @@ def drop_task(conn, task_id: int) -> Task | None:
 
 
 def block_task(conn, task_id: int, blocked_by: int) -> Task | None:
+    """Make task_id wait on blocked_by. The orchestrator validates cycles and both statuses
+    before calling; these guards make the function safe on its own against a self-block or a
+    blocker that does not exist."""
+    if task_id == blocked_by:
+        return None
+    blocker = get_task(conn, blocked_by)
+    if blocker is None or blocker.status != STATUS_PENDING:
+        return None
     cur = conn.execute(
         "UPDATE tasks SET blocked_by = ? WHERE id = ? AND status = ?",
         (blocked_by, task_id, STATUS_PENDING),
@@ -154,9 +162,12 @@ def update_task(conn, task_id, *, text=None, priority=None, deadline=_UNSET) -> 
 
 
 def unblock_task(conn, task_id: int) -> Task | None:
-    conn.execute("UPDATE tasks SET blocked_by = NULL WHERE id = ?", (task_id,))
+    cur = conn.execute(
+        "UPDATE tasks SET blocked_by = NULL WHERE id = ? AND status = ?",
+        (task_id, STATUS_PENDING),
+    )
     conn.commit()
-    return get_task(conn, task_id)
+    return get_task(conn, task_id) if cur.rowcount else None
 
 
 def mark_nagged(conn, task_id: int, when: datetime) -> None:

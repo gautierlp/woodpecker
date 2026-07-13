@@ -4,13 +4,14 @@ from zoneinfo import ZoneInfo
 
 STALE_THRESHOLD_DAYS = 3
 SLOW_RESURFACE_DAYS = 7  # a waved-off normal, stale task is re-poked at most once this often
-DUE_SOON_DAYS = 2  # a deadline this close (or past) counts as urgent
 QUIET_START_HOUR = 6  # first hour of the day pings are allowed
 QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
 NAG_HOURS = (9, 13, 19)
 DAILY_FOCUS_HOUR = 6
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"
+ANTHROPIC_TIMEOUT_SECONDS = 30  # a Claude call that hangs past this fails fast, freeing the loop
+INTERPRET_MAX_TOKENS = 4000  # room for many record_intent calls in one pasted list
 
 
 def now_paris() -> datetime:

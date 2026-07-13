@@ -204,3 +204,16 @@ def test_slow_resurface_ignores_blocked_task():
     dep = make(2, created=NOW - timedelta(days=5), blocked_by=1)
     # exclude the blocker as the focus; the only other candidate (dep) is blocked -> None
     assert selection.select_slow_resurface([blocker, dep], NOW, exclude_id=1) is None
+
+
+def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
+    from jolt import config, selection
+
+    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+    created = now - timedelta(days=10)  # stale
+    last_nagged = now - timedelta(days=config.SLOW_RESURFACE_DAYS)  # exactly the cadence
+    task = Task(
+        id=1, text="sort photos", priority=PRIORITY_NORMAL, deadline=None,
+        created_at=created, status=STATUS_PENDING, last_nagged_at=last_nagged, completed_at=None,
+    )
+    assert selection.select_slow_resurface([task], now) is task

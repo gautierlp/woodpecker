@@ -1,12 +1,11 @@
 import logging
 import os
 
-from anthropic import Anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from . import bot, config, db, scheduler
+from . import bot, config, db, llm, scheduler
 from .memory import ConversationMemory
 
 logger = logging.getLogger(__name__)
@@ -72,7 +71,7 @@ def main() -> None:
     logger.info("Opening database at %s", config.db_path())
     conn = db.connect(config.db_path())
     db.init_db(conn)
-    client = Anthropic(api_key=config.anthropic_api_key())
+    client = llm.build_client(config.anthropic_api_key())
     chat_id = config.telegram_chat_id()
     logger.info(
         "Configured for chat_id=%s, model=%s, timezone=%s", chat_id, config.MODEL, config.TIMEZONE

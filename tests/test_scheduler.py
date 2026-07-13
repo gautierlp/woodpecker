@@ -29,6 +29,16 @@ class FakeClient:
         return SimpleNamespace(content=[SimpleNamespace(type="text", text="canned prose")])
 
 
+class RaisingClient:
+    """A client whose create() always raises, to exercise the failure path."""
+
+    def __init__(self):
+        self.messages = self
+
+    def create(self, **kwargs):
+        raise RuntimeError("boom")
+
+
 def collector():
     sent = []
     return sent, lambda msg: sent.append(msg)
@@ -130,3 +140,28 @@ def test_slow_resurface_gated_by_cadence():
     sent, send = collector()
     scheduler.send_nags(conn, send, FakeClient(), now)
     assert len(sent) == 1
+
+
+def test_daily_focus_sends_a_fallback_when_the_llm_fails():
+    conn = fresh()
+    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
+    db.add_task(conn, "call vet", "important", None, now)
+    sent, send = collector()
+    scheduler.send_daily_focus(conn, send, RaisingClient(), now, chat_id=42)
+    assert len(sent) == 1  # the user hears about it rather than silence
+    assert sent[0]  # non-empty fallback text
+
+
+def test_nags_attempt_the_tadpole_even_if_the_frog_nag_fails():
+    # An important stale frog and a normal stale tadpole. The frog nag raises; the tadpole
+    # nag must still be attempted, and the user gets exactly one failure note.
+    conn = fresh()
+    created = datetime(2026, 7, 5, tzinfo=TZ)  # 7 days before now
+    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+    db.add_task(conn, "file taxes", "important", None, created)
+    db.add_task(conn, "sort old photos", "normal", None, created)
+    sent, send = collector()
+    scheduler.send_nags(conn, send, RaisingClient(), now)
+    # Both nags raise, so no real nags go out, but the user is told once, not zero times.
+    assert len(sent) == 1
+    assert sent[0]

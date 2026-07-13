@@ -50,14 +50,6 @@ def is_stale(task: Task, now: datetime, threshold_days: int = config.STALE_THRES
     return now - task.created_at >= timedelta(days=threshold_days)
 
 
-def is_urgent(task: Task, now: datetime, due_soon_days: int = config.DUE_SOON_DAYS) -> bool:
-    # Urgent = the deadline is close/overdue, or the task has been sitting long enough
-    # to count as avoided. Either way it should press harder.
-    if task.deadline is not None and task.deadline <= (now.date() + timedelta(days=due_soon_days)):
-        return True
-    return is_stale(task, now)
-
-
 def select_daily_focus(tasks: list[Task], now: datetime) -> DailyFocus:
     ordered = order_backlog(tasks)
     actionable = [t for t in ordered if not is_blocked(t, tasks)]

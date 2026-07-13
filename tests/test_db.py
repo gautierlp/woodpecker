@@ -213,6 +213,12 @@ def test_save_display_round_trips():
     assert db.load_display(conn, 42) == [45, 46, 47]
 
 
+def test_save_display_round_trips_empty_list():
+    conn = fresh()
+    db.save_display(conn, 42, [])
+    assert db.load_display(conn, 42) == []
+
+
 def test_save_display_overwrites_previous():
     conn = fresh()
     db.save_display(conn, 42, [1, 2, 3])
@@ -252,3 +258,47 @@ def test_init_db_migrates_existing_table_without_blocked_by():
     db.init_db(conn)
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
     assert "blocked_by" in cols
+
+
+def test_unblock_returns_none_for_a_done_task():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "wax the car", PRIORITY_NORMAL, None, now)
+    db.complete_task(conn, t.id, now)  # now done, not pending
+    assert db.unblock_task(conn, t.id) is None
+
+
+def test_unblock_returns_none_for_a_missing_task():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    assert db.unblock_task(conn, 9999) is None
+
+
+def test_block_rejects_self_reference():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "paint fence", PRIORITY_NORMAL, None, now)
+    assert db.block_task(conn, t.id, t.id) is None
+    assert db.get_task(conn, t.id).blocked_by is None
+
+
+def test_block_rejects_missing_blocker():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    t = db.add_task(conn, "paint fence", PRIORITY_NORMAL, None, now)
+    assert db.block_task(conn, t.id, 9999) is None
+    assert db.get_task(conn, t.id).blocked_by is None
+
+
+def test_block_still_works_for_valid_input():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    now = datetime(2026, 7, 12, tzinfo=TZ)
+    a = db.add_task(conn, "buy paint", PRIORITY_NORMAL, None, now)
+    b = db.add_task(conn, "paint fence", PRIORITY_NORMAL, None, now)
+    result = db.block_task(conn, b.id, a.id)
+    assert result is not None
+    assert result.blocked_by == a.id

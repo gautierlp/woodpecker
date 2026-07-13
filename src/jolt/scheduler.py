@@ -13,11 +13,15 @@ def send_daily_focus(conn, send, client, now: datetime, chat_id: int) -> None:
     tasks = db.list_all(conn)
     focus = select_daily_focus(tasks, now)
     logger.info("Selected focus task_id=%s", focus.focus.id if focus.focus else None)
-    prose = llm.write_focus(focus, now, client)
     backlog = render_backlog(tasks, now)
     # Record the exact order shown, so a number the user types after the focus resolves
     # against this list, not a live order that later completions may have renumbered.
     db.save_display(conn, chat_id, [t.id for t in display_order(tasks, now)])
+    try:
+        prose = llm.write_focus(focus, now, client)
+    except Exception:
+        logger.exception("Daily focus prose failed; sending the backlog with a plain lead")
+        prose = "Morning. I couldn't write today's lead, but here's where things stand."
     send(f"{prose}\n\n{backlog}")
 
 
@@ -29,14 +33,25 @@ def send_nags(conn, send, client, now: datetime) -> None:
     tasks = db.list_all(conn)
     focus = select_daily_focus(tasks, now)
     focus_id = focus.focus.id if focus.focus else None
+    tadpole = select_slow_resurface(tasks, now, exclude_id=focus_id)
+    failed = False
+
+    def _nag(task):
+        nonlocal failed
+        try:
+            send(llm.write_nag(task, now, client))
+            db.mark_nagged(conn, task.id, now)
+        except Exception:
+            logger.exception("Nag failed for task_id=%s", task.id)
+            failed = True
+
     if focus.focus is not None:
         logger.info("Nagging about focus task_id=%s", focus.focus.id)
-        send(llm.write_nag(focus.focus, now, client))
-        db.mark_nagged(conn, focus.focus.id, now)
-    tadpole = select_slow_resurface(tasks, now, exclude_id=focus_id)
+        _nag(focus.focus)
     if tadpole is not None:
         logger.info("Slow re-surface of task_id=%s", tadpole.id)
-        send(llm.write_nag(tadpole, now, client))
-        db.mark_nagged(conn, tadpole.id, now)
+        _nag(tadpole)
     if focus.focus is None and tadpole is None:
         logger.info("Skipping nag: nothing to nag about")
+    elif failed:
+        send("I tried to nudge you but something on my end broke. I'll try again next time.")
