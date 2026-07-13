@@ -46,7 +46,7 @@ async def handle_message(update, context) -> None:
     tasks = db.list_all(conn)
     history = memory.get(chat_id)
     outbound = memory.get_outbound(chat_id)
-    display_ids = memory.get_display(chat_id)
+    display_ids = db.load_display(conn, chat_id)
     intents = llm.interpret_message(
         text, tasks, now, client, history=history, recent_outbound=outbound, display_ids=display_ids
     )
@@ -57,7 +57,7 @@ async def handle_message(update, context) -> None:
     # the next message resolve against this list rather than a later, shifted order.
     if any(intent.action == "list" for intent in intents):
         shown = render.display_order(db.list_all(conn), now)
-        memory.note_display(chat_id, [t.id for t in shown])
+        db.save_display(conn, chat_id, [t.id for t in shown])
     memory.add(chat_id, text, reply)
     # The pending nag has now been answered (or superseded by real conversation), so
     # it must not colour the next, unrelated message.

@@ -202,6 +202,44 @@ def test_update_task_missing_returns_none():
     assert db.update_task(conn, 999, priority=PRIORITY_IMPORTANT) is None
 
 
+def test_load_display_returns_none_when_never_saved():
+    conn = fresh()
+    assert db.load_display(conn, 42) is None
+
+
+def test_save_display_round_trips():
+    conn = fresh()
+    db.save_display(conn, 42, [45, 46, 47])
+    assert db.load_display(conn, 42) == [45, 46, 47]
+
+
+def test_save_display_overwrites_previous():
+    conn = fresh()
+    db.save_display(conn, 42, [1, 2, 3])
+    db.save_display(conn, 42, [9, 8])
+    assert db.load_display(conn, 42) == [9, 8]
+
+
+def test_display_snapshot_is_per_chat():
+    conn = fresh()
+    db.save_display(conn, 1, [1, 2])
+    assert db.load_display(conn, 2) is None
+
+
+def test_display_snapshot_survives_reconnect(tmp_path):
+    # The whole point of persisting it: the snapshot lives on disk, so a restart (a fresh
+    # connection to the same file) keeps it instead of dropping number-resolution back to
+    # the live order. This is the decisive half of the "28 done hit the wrong task" bug.
+    path = str(tmp_path / "jolt.db")
+    conn = db.connect(path)
+    db.init_db(conn)
+    db.save_display(conn, 42, [45, 46, 47])
+    conn.close()
+    reopened = db.connect(path)
+    db.init_db(reopened)
+    assert db.load_display(reopened, 42) == [45, 46, 47]
+
+
 def test_init_db_migrates_existing_table_without_blocked_by():
     conn = db.connect(":memory:")
     # Simulate the live table created before the blocked_by column existed.

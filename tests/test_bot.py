@@ -168,7 +168,7 @@ def test_handle_message_snapshots_the_shown_list_for_next_message(monkeypatch):
     update = make_update("current tasks")
     context = make_context(conn, None, memory=memory)
     asyncio.run(bot.handle_message(update, context))
-    assert memory.get_display(42) == [t1.id, t2.id]
+    assert db.load_display(conn, 42) == [t1.id, t2.id]
 
 
 def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):
@@ -176,7 +176,7 @@ def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):
     # against the list the user saw rather than the current order.
     conn = fresh()
     memory = ConversationMemory()
-    memory.note_display(42, [7, 3, 9])
+    db.save_display(conn, 42, [7, 3, 9])
     seen = {}
 
     def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):

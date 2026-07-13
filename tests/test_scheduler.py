@@ -39,11 +39,25 @@ def test_daily_focus_sends_prose_then_backlog():
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
     db.add_task(conn, "call vet", "important", None, now)
     sent, send = collector()
-    scheduler.send_daily_focus(conn, send, FakeClient(), now)
+    scheduler.send_daily_focus(conn, send, FakeClient(), now, chat_id=42)
     assert len(sent) == 1
     assert "canned prose" in sent[0]
     assert "📋 " in sent[0]
     assert "call vet" in sent[0]
+
+
+def test_daily_focus_snapshots_the_order_it_shows():
+    # The 06:00 focus prints a numbered backlog but used to never record that order, so a
+    # number typed after it resolved against a re-derived live list (the "28 done" bug).
+    # It must snapshot the exact order shown, keyed by chat, so the next number lines up
+    # with what the user is looking at. Here 'a' is important, 'b' normal, so a ranks first.
+    conn = fresh()
+    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
+    a = db.add_task(conn, "a", "important", None, now)
+    b = db.add_task(conn, "b", "normal", None, now)
+    sent, send = collector()
+    scheduler.send_daily_focus(conn, send, FakeClient(), now, chat_id=42)
+    assert db.load_display(conn, 42) == [a.id, b.id]
 
 
 def test_nags_skipped_during_quiet_hours():
@@ -71,7 +85,7 @@ def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
     job a coroutine, so APScheduler runs them on the bot's own event-loop thread."""
     conn = fresh()
     sent, send = collector()
-    sched = main.build_scheduler(conn, send, FakeClient())
+    sched = main.build_scheduler(conn, send, FakeClient(), chat_id=42)
     assert isinstance(sched, AsyncIOScheduler)
     jobs = sched.get_jobs()
     assert len(jobs) == 1 + len(config.NAG_HOURS)

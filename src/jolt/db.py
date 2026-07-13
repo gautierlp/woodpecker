@@ -19,6 +19,17 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 """
 
+# One row per chat: the task ids, in order, of the last list shown to it. A number the
+# user types is a position in this list, so it must survive a restart. Kept here rather
+# than in-process memory precisely so a redeploy does not drop resolution back to the
+# live order (the "28 done hit the wrong task" bug).
+_DISPLAY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS display_snapshot (
+    chat_id INTEGER PRIMARY KEY,
+    task_ids TEXT NOT NULL
+);
+"""
+
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
@@ -28,6 +39,7 @@ def connect(path: str) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(_SCHEMA)
+    conn.execute(_DISPLAY_SCHEMA)
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
     if "blocked_by" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN blocked_by INTEGER")
@@ -150,3 +162,26 @@ def unblock_task(conn, task_id: int) -> Task | None:
 def mark_nagged(conn, task_id: int, when: datetime) -> None:
     conn.execute("UPDATE tasks SET last_nagged_at = ? WHERE id = ?", (when.isoformat(), task_id))
     conn.commit()
+
+
+def save_display(conn, chat_id: int, task_ids: list[int]) -> None:
+    """Record the order of the last list shown to a chat, replacing any previous one.
+    Only a fresh list overwrites it, so numbers keep resolving against what the user saw."""
+    conn.execute(
+        "INSERT INTO display_snapshot (chat_id, task_ids) VALUES (?, ?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET task_ids = excluded.task_ids",
+        (chat_id, ",".join(str(i) for i in task_ids)),
+    )
+    conn.commit()
+
+
+def load_display(conn, chat_id: int) -> list[int] | None:
+    """The ordered ids of the last list shown to a chat, or None if none has been shown
+    (callers then fall back to the live order)."""
+    row = conn.execute(
+        "SELECT task_ids FROM display_snapshot WHERE chat_id = ?", (chat_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    raw = row["task_ids"]
+    return [int(part) for part in raw.split(",")] if raw else []

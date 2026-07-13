@@ -43,7 +43,7 @@ def _make_send(application, chat_id):
     return send
 
 
-def build_scheduler(conn, send, client) -> AsyncIOScheduler:
+def build_scheduler(conn, send, client, chat_id) -> AsyncIOScheduler:
     """Build the cron scheduler for the daily focus and nags.
 
     The jobs are coroutines on purpose: AsyncIOScheduler runs coroutine jobs on the
@@ -54,7 +54,7 @@ def build_scheduler(conn, send, client) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(timezone=config.TIMEZONE)
 
     async def _daily_focus():
-        scheduler.send_daily_focus(conn, send, client, config.now_paris())
+        scheduler.send_daily_focus(conn, send, client, config.now_paris(), chat_id)
 
     async def _nags():
         scheduler.send_nags(conn, send, client, config.now_paris())
@@ -85,7 +85,7 @@ def main() -> None:
         # AsyncIOScheduler binds to the bot's running loop: the jobs then execute on the
         # same thread that owns `conn` and the Telegram send.
         send = bot.make_recording_send(_make_send(application, chat_id), memory, chat_id)
-        sched = build_scheduler(conn, send, client)
+        sched = build_scheduler(conn, send, client, chat_id)
         sched.start()
         application.bot_data["scheduler"] = sched
         logger.info(
@@ -94,9 +94,7 @@ def main() -> None:
             ", ".join(f"{h:02d}:00" for h in config.NAG_HOURS),
         )
 
-    application = (
-        Application.builder().token(config.telegram_token()).post_init(_post_init).build()
-    )
+    application = Application.builder().token(config.telegram_token()).post_init(_post_init).build()
     application.bot_data.update(
         {"conn": conn, "client": client, "chat_id": chat_id, "memory": memory}
     )
