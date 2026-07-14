@@ -1,5 +1,6 @@
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -11,16 +12,37 @@ from .memory import ConversationMemory
 logger = logging.getLogger(__name__)
 
 
+def _build_log_handlers() -> list[logging.Handler]:
+    """The handlers root logging is configured with: always a stdout stream (so
+    `docker logs` works for the live container) and, when config.log_file() is set, also
+    a rotating file. The file lives on a bind-mounted path, so it survives container
+    recreation: Docker discards a recreated container's own stdout on every redeploy,
+    which otherwise wiped the entire history. Kept side-effect-light (only creates the
+    log directory) so it is unit-testable without touching the global root logger."""
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    log_file = config.log_file()
+    if log_file:
+        os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+        # Rotate so a DEBUG-level log on a long-running bot cannot fill the disk:
+        # at most 5 x 2 MB = 10 MB kept.
+        handlers.append(
+            RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+        )
+    for handler in handlers:
+        handler.setFormatter(formatter)
+    return handlers
+
+
 def setup_logging() -> None:
     """Configure root logging once, at process start. Level is driven by JOLT_LOG_LEVEL
     (default INFO; set DEBUG to trace everything). Even at DEBUG we keep the flood in
     check: our own jolt.* loggers run at the root level, third-party libraries are capped
     at INFO, and the byte-level HTTP loggers are pinned to WARNING. So DEBUG still shows
-    Jolt's own lines and full Claude I/O without drowning them in poll-loop chatter."""
-    logging.basicConfig(
-        level=config.log_level(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    Jolt's own lines and full Claude I/O without drowning them in poll-loop chatter.
+
+    force=True so our handlers win even if an import configured root logging first."""
+    logging.basicConfig(level=config.log_level(), handlers=_build_log_handlers(), force=True)
     for lib in ("telegram", "anthropic", "apscheduler"):
         logging.getLogger(lib).setLevel(logging.INFO)
     # httpx logs each request URL at INFO, and the Telegram token lives in that URL

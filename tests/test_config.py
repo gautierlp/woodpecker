@@ -46,3 +46,22 @@ def test_log_level_defaults_to_info_and_uppercases(monkeypatch):
     assert config.log_level() == "INFO"
     monkeypatch.setenv("JOLT_LOG_LEVEL", "debug")
     assert config.log_level() == "DEBUG"
+
+
+def test_log_file_defaults_to_a_path_under_logs(monkeypatch):
+    # A default path (not None) so logs persist out of the box. It lives under ./logs,
+    # which is bind-mounted in the container, so the file survives redeploys.
+    monkeypatch.delenv("JOLT_LOG_FILE", raising=False)
+    assert config.log_file() == "logs/jolt.log"
+
+
+def test_log_file_respects_env_override(monkeypatch):
+    monkeypatch.setenv("JOLT_LOG_FILE", "/app/logs/jolt.log")
+    assert config.log_file() == "/app/logs/jolt.log"
+
+
+def test_log_file_empty_string_disables_file_logging(monkeypatch):
+    # An explicit empty value turns file logging off (handy for local runs and tests),
+    # rather than creating a stray ./ file.
+    monkeypatch.setenv("JOLT_LOG_FILE", "")
+    assert config.log_file() is None

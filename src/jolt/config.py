@@ -36,3 +36,12 @@ def db_path() -> str:
 
 def log_level() -> str:
     return os.environ.get("JOLT_LOG_LEVEL", "INFO").upper()
+
+
+def log_file() -> str | None:
+    # Path for a persistent log file, written in addition to stdout. It lives under a
+    # bind-mounted directory in the container (see docker-compose.yml), so the log
+    # survives container recreation: Docker discards a recreated container's own stdout
+    # on every redeploy, which was wiping the whole history. Set JOLT_LOG_FILE="" to
+    # disable file logging (local runs, tests).
+    return os.environ.get("JOLT_LOG_FILE", "logs/jolt.log") or None

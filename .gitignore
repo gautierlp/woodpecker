@@ -18,5 +18,9 @@ data/
 *.sqlite
 *.sqlite3
 
+# Logs (persisted to a bind-mounted ./logs on the host, survive redeploys)
+logs/
+*.log
+
 # OS
 .DS_Store

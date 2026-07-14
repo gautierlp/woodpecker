@@ -6,7 +6,12 @@ services:
     env_file: .env
     environment:
       JOLT_DB_PATH: /app/data/jolt.db
+      # A persistent log file on the ./logs mount below, so history survives redeploys
+      # (a recreated container otherwise loses its own stdout). Kept out of ./data so it
+      # is not swept into the nightly restic backup.
+      JOLT_LOG_FILE: /app/logs/jolt.log
       # DEBUG traces message bodies and full Claude I/O; flip to INFO to quieten.
       JOLT_LOG_LEVEL: DEBUG
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
