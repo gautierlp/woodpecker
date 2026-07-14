@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -418,6 +419,31 @@ def _important_task(id=1):
         last_nagged_at=None,
         completed_at=None,
     )
+
+
+def test_log_usage_includes_dollar_cost(caplog):
+    # Every Claude call logs its dollar cost, so the persistent log can be summed to see
+    # spend over time. A typical interpret call (~4000 in / 60 out) is a fraction of a cent.
+    response = SimpleNamespace(
+        stop_reason="tool_use",
+        usage=SimpleNamespace(input_tokens=4000, output_tokens=60),
+    )
+    with caplog.at_level(logging.INFO, logger="jolt.llm"):
+        llm._log_usage("interpret_message", response)
+    message = caplog.records[-1].getMessage()
+    assert "in=4000" in message
+    assert "out=60" in message
+    assert "cost=$0.0043" in message
+
+
+def test_log_usage_handles_missing_usage(caplog):
+    # A response without a usage block (a malformed / error response) must not crash the
+    # log call; cost is reported as unknown rather than a wrong number.
+    response = SimpleNamespace(stop_reason="end_turn", usage=None)
+    with caplog.at_level(logging.INFO, logger="jolt.llm"):
+        llm._log_usage("write_nag", response)
+    message = caplog.records[-1].getMessage()
+    assert "cost=?" in message
 
 
 def test_write_nag_passes_importance_to_prompt():

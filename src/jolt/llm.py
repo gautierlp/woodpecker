@@ -19,15 +19,22 @@ def build_client(api_key: str) -> Anthropic:
 
 
 def _log_usage(label: str, response) -> None:
-    """Record model, token usage and stop reason for one Claude call, so cost and
-    truncation issues are visible in the logs."""
+    """Record token usage, dollar cost and stop reason for one Claude call, so spend and
+    truncation issues are visible in the logs (and the cost can be summed over time)."""
     usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        cost = f"${config.call_cost_usd(input_tokens, output_tokens):.5f}"
+    else:
+        cost = "?"
     logger.info(
-        "Claude %s: stop=%s in=%s out=%s",
+        "Claude %s: stop=%s in=%s out=%s cost=%s",
         label,
         getattr(response, "stop_reason", "?"),
-        getattr(usage, "input_tokens", "?"),
-        getattr(usage, "output_tokens", "?"),
+        input_tokens if input_tokens is not None else "?",
+        output_tokens if output_tokens is not None else "?",
+        cost,
     )
 
 

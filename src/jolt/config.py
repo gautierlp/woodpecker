@@ -10,6 +10,11 @@ NAG_HOURS = (9, 13, 19)
 DAILY_FOCUS_HOUR = 6
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"
+# USD per million tokens for MODEL, from Anthropic's pricing. Update these together with
+# MODEL. Haiku 4.5 is $1.00 in / $5.00 out per 1M tokens. Jolt sends no cached tokens, so
+# input is always billed at the full rate.
+MODEL_PRICE_INPUT_USD_PER_MTOK = 1.00
+MODEL_PRICE_OUTPUT_USD_PER_MTOK = 5.00
 ANTHROPIC_TIMEOUT_SECONDS = 30  # a Claude call that hangs past this fails fast, freeing the loop
 INTERPRET_MAX_TOKENS = 4000  # room for many record_intent calls in one pasted list
 
@@ -45,3 +50,12 @@ def log_file() -> str | None:
     # on every redeploy, which was wiping the whole history. Set JOLT_LOG_FILE="" to
     # disable file logging (local runs, tests).
     return os.environ.get("JOLT_LOG_FILE", "logs/jolt.log") or None
+
+
+def call_cost_usd(input_tokens: int, output_tokens: int) -> float:
+    """Dollar cost of one Claude call at MODEL's pricing, so each call's spend can be
+    logged and later summed from the persistent log."""
+    return (
+        input_tokens * MODEL_PRICE_INPUT_USD_PER_MTOK
+        + output_tokens * MODEL_PRICE_OUTPUT_USD_PER_MTOK
+    ) / 1_000_000

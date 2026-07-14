@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from jolt import config
 from jolt.models import Task, DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING
 
@@ -65,3 +67,20 @@ def test_log_file_empty_string_disables_file_logging(monkeypatch):
     # rather than creating a stray ./ file.
     monkeypatch.setenv("JOLT_LOG_FILE", "")
     assert config.log_file() is None
+
+
+def test_call_cost_usd_uses_input_and_output_prices():
+    # Input tokens are billed at the input rate, output at the output rate, both per
+    # million. Asymmetric inputs catch a swapped-price or missing-/1e6 bug.
+    assert config.call_cost_usd(1_000_000, 0) == pytest.approx(
+        config.MODEL_PRICE_INPUT_USD_PER_MTOK
+    )
+    assert config.call_cost_usd(0, 1_000_000) == pytest.approx(
+        config.MODEL_PRICE_OUTPUT_USD_PER_MTOK
+    )
+    assert config.call_cost_usd(0, 0) == 0.0
+
+
+def test_call_cost_usd_of_a_typical_call():
+    # ~4000 input + 60 output on Haiku pricing ($1 / $5 per MTok) is about $0.0043.
+    assert config.call_cost_usd(4000, 60) == pytest.approx(0.0043)
