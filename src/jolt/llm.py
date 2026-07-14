@@ -308,6 +308,17 @@ def interpret_message(
         )
     system += "Current backlog:\n" + _task_lines(display_ids, tasks, now)
     messages = list(history or [])
+    if recent_outbound and messages:
+        # The pending nag/focus is the freshest thing Jolt said, but it lives outside
+        # `history`. Without it in the transcript, a reply like "what are you talking
+        # about?" resolves against the last handled turn (often a stale backlog) and Jolt
+        # answers about the wrong thing. Add it as the most recent assistant turn so the
+        # transcript reflects what Jolt actually last said. The API merges consecutive
+        # same-role messages, so this is safe even when `history` already ends with an
+        # assistant turn. Skip it when there is no history: the message list must start
+        # with a user turn, and with no prior turns there is no stale transcript for the
+        # nag to override (the system-prompt copy above already carries it).
+        messages.append({"role": "assistant", "content": recent_outbound})
     messages.append({"role": "user", "content": message})
     logger.debug(
         "interpret_message: %d task(s) in store, %d prior turn(s) in context",
@@ -417,6 +428,9 @@ def write_nag(task: Task, now: datetime, client) -> str:
         )
     system = (
         "You are Jolt. Write one short nag (1 to 2 lines) about the task below. "
+        "This message arrives on its own, with no other context on the user's screen, so "
+        "name the specific task you are nudging about (quote it or refer to it clearly) "
+        "rather than assuming the user knows which one you mean. "
         + guidance
         + " Never guilt-trip. Never use an em dash (the '—' character); use a comma, a colon, or a "
         "period instead. This rule has no exceptions."

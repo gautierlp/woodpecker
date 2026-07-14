@@ -271,6 +271,59 @@ def test_prompt_omits_outbound_section_when_none():
     assert "recently sent" not in client.messages.calls[0]["system"].lower()
 
 
+def test_pending_nag_is_woven_into_transcript_after_history():
+    # The incoherent-reply bug: a nag is Jolt's freshest message but lives only in the
+    # system prompt, so a reply like "what are you talking about?" resolved against the
+    # last handled turn (a stale backlog) rather than the nag, and Jolt answered "I showed
+    # you your task list." The nag must appear as the most recent assistant turn in the
+    # transcript, right before the new user message.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "answer", "reply": "..."}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    history = [
+        {"role": "user", "content": "Tasks"},
+        {"role": "assistant", "content": "the whole backlog listing"},
+    ]
+    nag = "What's blocking you from sending that message right now?"
+    llm.interpret_message(
+        "What are you talking about?",
+        [_task()],
+        NOW,
+        client,
+        history=history,
+        recent_outbound=nag,
+    )
+    messages = client.messages.calls[0]["messages"]
+    assert messages[-1] == {"role": "user", "content": "What are you talking about?"}
+    assert messages[-2] == {"role": "assistant", "content": nag}
+
+
+def test_pending_nag_not_woven_when_no_history():
+    # With no prior turns, injecting the nag as an assistant turn would make the message
+    # list start with an assistant message, which the API rejects (the list must start
+    # with a user turn). The nag stays in the system prompt only; there is no stale
+    # transcript for it to override anyway.
+    tool_block = SimpleNamespace(
+        type="tool_use", name="record_intent", input={"action": "answer", "reply": "..."}
+    )
+    client = FakeClient(SimpleNamespace(content=[tool_block]))
+    llm.interpret_message("what?", [_task()], NOW, client, recent_outbound="Still the taxes. Go.")
+    messages = client.messages.calls[0]["messages"]
+    assert messages == [{"role": "user", "content": "what?"}]
+
+
+def test_write_nag_prompt_instructs_naming_the_task():
+    # A nag fires on a schedule, out of any visible context, so it must say which task it
+    # is about. Otherwise "what's blocking you from sending that message?" reads as a
+    # non-sequitur with no antecedent (the real confusion this fixes).
+    text_block = SimpleNamespace(type="text", text="go")
+    client = FakeClient(SimpleNamespace(content=[text_block]))
+    llm.write_nag(_important_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "name the task" in system or "name the specific task" in system
+
+
 def test_interpret_message_returns_every_task_in_a_multi_task_message():
     # A single message can hold several tasks (a pasted list). Each must come back as
     # its own intent; the old code stopped after the first tool_use block and dropped
@@ -403,7 +456,9 @@ def test_out_of_range_number_becomes_a_clarification():
     tasks = [_task(id=10)]
     display_ids = [10]  # only position 1 exists
     intent = llm.Intent(action="complete", task_id=45)  # user referenced "45"
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert len(resolved) == 1
     assert resolved[0].action == "answer"
     assert "45" in resolved[0].reply
@@ -414,7 +469,9 @@ def test_in_range_number_still_resolves_to_its_id():
     tasks = [_task(id=10)]
     display_ids = [10]
     intent = llm.Intent(action="complete", task_id=1)  # position 1 -> id 10
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "complete"
     assert resolved[0].task_id == 10
 
@@ -596,7 +653,9 @@ def test_one_malformed_block_does_not_drop_the_others():
         usage=SimpleNamespace(input_tokens=10, output_tokens=10),
     )
     intents = llm.interpret_message(
-        "buy milk; call bank next week", [_task()], datetime(2026, 7, 13, tzinfo=TZ),
+        "buy milk; call bank next week",
+        [_task()],
+        datetime(2026, 7, 13, tzinfo=TZ),
         FakeClient(response),
     )
     actions = [i.action for i in intents]
@@ -612,7 +671,10 @@ def test_truncated_response_appends_a_note():
         usage=SimpleNamespace(input_tokens=10, output_tokens=10),
     )
     intents = llm.interpret_message(
-        "a very long paste", [_task()], datetime(2026, 7, 13, tzinfo=TZ), FakeClient(response),
+        "a very long paste",
+        [_task()],
+        datetime(2026, 7, 13, tzinfo=TZ),
+        FakeClient(response),
     )
     assert intents[-1].action == "answer"
     assert "too long" in intents[-1].reply.lower()
@@ -627,7 +689,10 @@ def test_truncation_note_when_no_block_parses():
         usage=SimpleNamespace(input_tokens=10, output_tokens=10),
     )
     intents = llm.interpret_message(
-        "a very long unparseable paste", [_task()], datetime(2026, 7, 13, tzinfo=TZ), FakeClient(response),
+        "a very long unparseable paste",
+        [_task()],
+        datetime(2026, 7, 13, tzinfo=TZ),
+        FakeClient(response),
     )
     assert len(intents) == 1
     assert intents[0].action == "answer"
@@ -653,7 +718,9 @@ def test_resolve_positions_resolves_merge_from():
     tasks = [_task(id=10), _task(id=20)]
     display_ids = [10, 20]
     intent = llm.Intent(action="merge", task_id=1, merge_from=2, text="combined")
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "merge"
     assert resolved[0].task_id == 10
     assert resolved[0].merge_from == 20
@@ -663,7 +730,9 @@ def test_resolve_positions_out_of_range_merge_from_clarifies():
     tasks = [_task(id=10)]
     display_ids = [10]
     intent = llm.Intent(action="merge", task_id=1, merge_from=9, text="combined")
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "answer"
     assert "9" in resolved[0].reply
     assert resolved[0].merge_from is None
@@ -679,7 +748,9 @@ def test_resolve_positions_ignores_stray_ids_on_add():
     intent = llm.Intent(
         action="add", text="buy olive oil", task_id=37, blocked_by=37, merge_from=37
     )
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "add"
     assert resolved[0].text == "buy olive oil"
     assert resolved[0].task_id is None
@@ -693,7 +764,9 @@ def test_resolve_positions_ignores_stray_blocked_by_on_edit():
     tasks = [_task(id=10)]
     display_ids = [10]
     intent = llm.Intent(action="edit", task_id=1, blocked_by=99, deadline=date(2026, 7, 14))
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "edit"
     assert resolved[0].task_id == 10
     assert resolved[0].blocked_by is None
@@ -706,7 +779,9 @@ def test_resolve_positions_dedupes_repeated_missing_numbers():
     tasks = [_task(id=10)]
     display_ids = [10]
     intent = llm.Intent(action="block", task_id=9, blocked_by=9)
-    resolved = llm._resolve_positions([intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
     assert resolved[0].action == "answer"
     assert "9 or 9" not in resolved[0].reply
     assert "9" in resolved[0].reply
