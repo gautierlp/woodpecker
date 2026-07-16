@@ -4,12 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from jolt import bot, sidecar
 from jolt.llm import Intent
 from jolt.memory import ConversationMemory
 from jolt.models import STATUS_PENDING, Task
 from jolt.store import Store
-from jolt.vikunja import VikunjaError
+from jolt.vikunja import VikunjaClient, VikunjaError
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -242,6 +244,37 @@ def test_handle_message_replies_friendly_message_when_vikunja_unreachable(monkey
     monkeypatch.setattr(bot.llm, "interpret_message", spy)
     update = make_update("remind me to call vet")
     context = make_context(RaisingStore())
+    asyncio.run(bot.handle_message(update, context))  # must not raise
+    assert called is False
+    update.message.reply_text.assert_awaited_once()
+    reply = update.message.reply_text.call_args.args[0]
+    assert "unreachable" in reply.lower()
+
+
+def test_handle_message_replies_friendly_message_on_real_connection_outage(monkeypatch):
+    # The finding this guards against: a genuinely unreachable Vikunja (container down,
+    # connection refused) raises an httpx transport error, not an HTTP-status error.
+    # Wire the real VikunjaClient (through a MockTransport that raises on every call)
+    # into a real Store, so this test proves the friendly "unreachable" reply is
+    # reached via the actual client path, not just via a hand-rolled VikunjaError.
+    def handler(request):
+        raise httpx.ConnectError("Connection refused")
+
+    client = VikunjaClient("http://vk", "tok", project_id=3)
+    client._http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://vk")
+    conn = sidecar.connect(":memory:")
+    sidecar.init_db(conn)
+    store = Store(client, conn)
+
+    called = False
+
+    def spy(*a, **k):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(bot.llm, "interpret_message", spy)
+    update = make_update("remind me to call vet")
+    context = make_context(store)
     asyncio.run(bot.handle_message(update, context))  # must not raise
     assert called is False
     update.message.reply_text.assert_awaited_once()

@@ -197,3 +197,17 @@ def test_list_open_raises_on_404():
     c = _client(lambda r: httpx.Response(404, json={"message": "project not found"}))
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
+
+
+def test_transport_error_surfaces_as_vikunja_error():
+    # A genuinely unreachable Vikunja (container down, DNS failure, timeout) makes
+    # httpx raise a transport error, not an HTTP-status error. That must also
+    # surface as VikunjaError, so callers only ever need to catch one type.
+    def handler(request):
+        raise httpx.ConnectError("boom")
+
+    c = _client(handler)
+    with pytest.raises(vikunja.VikunjaError):
+        c.list_open()
+    with pytest.raises(vikunja.VikunjaError):
+        c.get_task(1)

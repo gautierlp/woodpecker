@@ -88,7 +88,10 @@ class VikunjaClient:
         # construction) so it still applies even if the client instance is swapped out,
         # e.g. tests replace `_http` with a MockTransport-backed client.
         headers = {"Authorization": f"Bearer {self._token}"}
-        resp = self._http.request(method, path, json=json, params=params, headers=headers)
+        try:
+            resp = self._http.request(method, path, json=json, params=params, headers=headers)
+        except httpx.HTTPError as exc:
+            raise VikunjaError(f"{method} {path} failed: {exc}") from exc
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
