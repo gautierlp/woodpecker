@@ -7,21 +7,28 @@ postponed. Plain-language interface powered by Claude.
 Private single-user project, not a SaaS. Built to break a specific personal loop
 (postpone, guilt, paralysis), so it leans into persistent nagging by design.
 
-**Status: deployed and running.** All 10 plan tasks are done: the full app
-(bot, LLM, tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy
-workflow. 182 tests pass. Live on `jarvis` as the `jolt` container (bot
-`@jolt_todo_bot`), with the self-hosted runner `gh-runner-jolt` auto-deploying on push
-to `main`. The SQLite file lives in the bind-mounted `./data`. See
-`docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for the full behavior,
-architecture, and rationale, and `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
-for the implementation plan.
+**Status: deployed and running, now backed by Vikunja.** The full app (bot, LLM,
+tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy workflow
+are in place, and the task store has been refactored onto Vikunja as the source of
+truth. Live on `jarvis` as the `jolt` container (bot `@jolt_todo_bot`), with the
+self-hosted runner `gh-runner-jolt` auto-deploying on push to `main`. The sidecar
+SQLite file (nag state + display snapshot, not tasks) lives in the bind-mounted
+`./data`. See `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for
+the original behavior and rationale, `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
+for the original implementation plan, and `docs/CUTOVER.md` for the Vikunja cutover
+runbook.
 
 ## Architecture
 
-Single Python application in a Docker container on the homelab host `jarvis`. One
-SQLite file for storage. No external database, no Redis, no vector store.
+Single Python application in a Docker container on the homelab host `jarvis`.
+**Vikunja is the task store** (source of truth for the backlog, reached over its
+REST API); **Jolt is the nagging brain over it**. Jolt keeps a small sidecar
+SQLite file for state that is its own, not Vikunja's: nag timestamps and the last
+rendered backlog order. No copy of the task list is kept in Jolt; every read goes
+live to Vikunja.
 
 External services:
+- **Vikunja API**: the task backlog (create, list open, get, mark done, delete)
 - **Telegram API**: messaging (receive user texts, send daily focus and nags)
 - **Anthropic API**: Claude interprets each inbound message and writes the focus,
   nags, and replies
@@ -29,7 +36,7 @@ External services:
 ### Division of labour (core principle)
 
 - **Claude** handles anything needing judgment or tone: parsing a text into a task,
-  classifying intent (add / complete / defer / question / blocker), and writing the
+  classifying intent (add / complete / drop / list / answer), and writing the
   daily focus, the nags, and the curious/escalating avoidance messages.
 - **Deterministic code** handles anything mechanical: the full backlog dump, the
   stale-age calculation, priority ordering, quiet-hours enforcement, and scheduling.
@@ -48,8 +55,9 @@ reworded, reordered, or hallucinated, and it is cheaper as plain code.
 Key libraries:
 - `python-telegram-bot`: Telegram handler
 - `anthropic`: Claude API client
+- `httpx`: Vikunja REST client
 - `APScheduler`: cron-based scheduler (06:00 focus, midday/evening nags, daily stale-scan)
-- `sqlite3` (stdlib): backlog storage
+- `sqlite3` (stdlib): sidecar storage (nag state + display snapshot only)
 
 ## Code Conventions
 
@@ -68,23 +76,35 @@ Following the `billie_bot` shape:
 
 ```
 src/jolt/
-  main.py         Entry point: wires up bot + scheduler, builds the client, starts the app
+  main.py         Entry point: wires up bot + scheduler, builds the clients, starts the app
   bot.py          Telegram handler: receives messages, sends replies and nags
   llm.py          Anthropic client: interprets messages, classifies intent, writes text
-  orchestrator.py Applies a parsed intent to the backlog and returns the reply text
+  orchestrator.py Applies a parsed intent (via the Store) and returns the reply text
   selection.py    Pure rules: stale detection, daily-focus selection, slow-resurface, quiet hours
   render.py       Deterministic backlog rendering and display ordering
   memory.py       In-process recent-conversation and pending-outbound memory per chat
   scheduler.py    Job bodies: daily focus and nags (wired to APScheduler cron in main.py)
-  db.py           SQLite access: the tasks table and the display_snapshot table
+  vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
+                  the Task <-> Vikunja JSON field mapping
+  sidecar.py      SQLite access for Jolt's own state: the nag_state table and the
+                  display_snapshot table (no task data)
+  store.py        Store: the storage seam the rest of Jolt talks to. Combines a
+                  VikunjaClient (task data) and the sidecar connection (nag state,
+                  display snapshot) behind one interface returning Task
   models.py       Task and DailyFocus dataclasses and the status/priority constants
   config.py       Named tunables and environment readers
 ```
 
-Data model has two tables. The `tasks` table: `id`, `text`, `priority`, `deadline`,
-`created_at`, `status` (pending/done/dropped), `last_nagged_at`, `completed_at`,
-`blocked_by`. The `display_snapshot` table holds one row per chat: the ordered task
-ids of the last list shown.
+Storage is a `Store` seam over two backends: `vikunja.py`'s `VikunjaClient` holds the
+tasks themselves (Vikunja is the source of truth, reached over its REST API), and
+`sidecar.py` holds only what is Jolt's own: `nag_state` (`task_id`, `last_nagged_at`)
+and `display_snapshot` (one row per chat: the ordered task ids of the last list
+shown). `store.py` is the only module the rest of Jolt (`orchestrator.py`,
+`scheduler.py`) talks to; it returns and accepts the `Task` dataclass so the rest of
+the app is unaware Vikunja exists. The `Task` dataclass no longer has a `blocked_by`
+field, and the intent set is `add` / `complete` / `drop` / `list` / `answer` (the
+earlier `edit`, `block`, and `merge` intents were removed since editing and
+blocker-tracking now live in Vikunja itself).
 
 ## Development
 
@@ -103,17 +123,20 @@ uv run ruff check .
 uv run ruff format .
 ```
 
-Environment variables: see `.env.example` (Telegram token, chat ID, Anthropic API key).
-Never commit `.env`.
+Environment variables: see `.env.example` (Telegram token, chat ID, Anthropic API key,
+Vikunja URL/token/project id, sidecar `JOLT_DB_PATH`). Never commit `.env`.
 
 ## Deployment
 
 Runs on the homelab host `jarvis` (SSH alias) as a Docker container under
-`/home/gautier/docker/<service>/`. Auto-deploys on git push via a self-hosted GitHub
-runner, the same pattern as the `fitness-data` service.
+`/home/gautier/docker/<service>/`, next to a separately deployed Vikunja instance
+(`tasks.example.com`) that Jolt talks to over its REST API. Auto-deploys on git push via
+a self-hosted GitHub runner, the same pattern as the `fitness-data` service.
 
-The SQLite file lives in a bind-mounted `./data/` directory so it survives restarts and
-is captured by the nightly restic to Backblaze B2 backup.
+The sidecar SQLite file (nag state + display snapshot only, no tasks) lives in a
+bind-mounted `./data/` directory so it survives restarts and is captured by the
+nightly restic to Backblaze B2 backup. The task backlog itself is not backed up by
+Jolt; it lives and is backed up as part of the Vikunja deployment.
 
 ```bash
 # Tail logs

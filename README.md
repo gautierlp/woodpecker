@@ -66,7 +66,7 @@
 
 [![Jolt][product-cover]](docs/assets/jolt-social.png)
 
-> ✅ **Deployed and running.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)) and it is live on the homelab host `jarvis`, auto-deploying on push to `main`. The Usage section below describes the interface.
+> ✅ **Deployed and running, now backed by Vikunja.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)) and it is live on the homelab host `jarvis`, auto-deploying on push to `main`. Vikunja is the task store (source of truth, over its REST API); Jolt is the nagging brain over it. See the [cutover runbook](docs/CUTOVER.md) for how the backlog moved. The Usage section below describes the interface.
 
 Jolt is a private Telegram bot that fights task avoidance. It is an ordinary todo list (you keep a full backlog and mean to clear all of it), with one specific twist: instead of sitting there passively like every other list, Jolt **actively pushes you at the tasks you keep avoiding**, ranked by how much you are dodging them. An important task that has sat untouched for days is the signal it is being deferred, and that is exactly what Jolt shoves back in your face.
 
@@ -98,8 +98,9 @@ A deliberate split runs through the whole thing: **Claude** handles judgment and
 
 - **[python-telegram-bot][telegram-url]** — the messaging layer
 - **[Anthropic Claude][claude-url]** — interprets messages, writes the nudges
+- **[Vikunja](https://vikunja.io/)**: the task store, self-hosted, reached over its REST API
 - **APScheduler** — fires the 06:00 focus, the nags, the daily stale-scan
-- **SQLite** — one file, one `tasks` table
+- **SQLite**: Jolt's own sidecar file (nag state + display snapshot), not the backlog
 - **Docker** — one container on the homelab host
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -113,6 +114,8 @@ A deliberate split runs through the whole thing: **Claude** handles judgment and
 - **[uv](https://docs.astral.sh/uv/)** for dependency management
 - A **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
 - An **Anthropic API key** (`ANTHROPIC_API_KEY`)
+- A running **Vikunja** instance, a project to use as the backlog, and an API token
+  (`VIKUNJA_URL`, `VIKUNJA_TOKEN`, `VIKUNJA_PROJECT_ID`)
 
 ### Installation
 
@@ -120,7 +123,7 @@ A deliberate split runs through the whole thing: **Claude** handles judgment and
 git clone https://github.com/gautierlp/jolt.git
 cd jolt
 uv sync                       # create the virtualenv and install dependencies
-cp .env.example .env          # then fill in your Telegram + Anthropic keys
+cp .env.example .env          # then fill in Telegram, Anthropic, and Vikunja details
 uv run python src/main.py     # run locally
 ```
 
@@ -178,6 +181,8 @@ Keep dodging and it escalates. Say "it's a someday thing" and it backs off. The 
 - [x] Claude message interpretation + intent classification
 - [x] Telegram layer + scheduler (06:00 focus, nags, stale-scan)
 - [x] Deploy to `jarvis` (Docker + git auto-deploy)
+- [x] Refactor storage onto Vikunja as the task source of truth, sidecar SQLite for
+      nag state + display snapshot (see [`docs/CUTOVER.md`](docs/CUTOVER.md))
 
 See the [open issues](https://github.com/gautierlp/jolt/issues) for the running list.
 

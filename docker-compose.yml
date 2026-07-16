@@ -13,5 +13,7 @@ services:
       # DEBUG traces message bodies and full Claude I/O; flip to INFO to quieten.
       JOLT_LOG_LEVEL: DEBUG
     volumes:
+      # ./data now holds only the sidecar SQLite (nag state + display snapshot);
+      # the task backlog itself lives in Vikunja, not on this bind mount.
       - ./data:/app/data
       - ./logs:/app/logs
