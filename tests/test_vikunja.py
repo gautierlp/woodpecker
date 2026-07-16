@@ -99,6 +99,9 @@ def test_create_task_raises_on_404():
 
 def test_list_open_maps_all_returned_tasks():
     def handler(request):
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
         return httpx.Response(
             200,
             json=[
@@ -173,22 +176,25 @@ def test_server_error_raises():
         c.list_open()
 
 
-def test_list_open_paginates_until_a_short_page():
+def test_list_open_paginates_past_a_server_enforced_page_cap():
+    # Live Vikunja caps page size at its own max_items_per_page (50 by default) no
+    # matter what per_page we request. The old "stop when the page is shorter than
+    # our requested per_page" logic would stop after page 1 here and silently
+    # truncate the backlog. The only correct stop condition is an empty page.
+    server_page_cap = 2
+    total_items = 5  # spans 3 server-capped pages (2, 2, 1) before the empty page
+
     def handler(request):
         page = int(request.url.params.get("page", "1"))
-        if page == 1:
-            items = [
-                {"id": i, "title": f"t{i}", "priority": 0, "position": i} for i in range(1, 251)
-            ]
-        elif page == 2:
-            items = [{"id": 300, "title": "last", "priority": 0, "position": 300}]
-        else:
-            items = []
+        start = (page - 1) * server_page_cap + 1
+        end = min(start + server_page_cap, total_items + 1)
+        ids = list(range(start, end)) if start <= total_items else []
+        items = [{"id": i, "title": f"t{i}", "priority": 0, "position": i} for i in ids]
         return httpx.Response(200, json=items)
 
     c = _client(handler)
     tasks = c.list_open()
-    assert [t.id for t in tasks] == list(range(1, 251)) + [300]
+    assert [t.id for t in tasks] == list(range(1, total_items + 1))
 
 
 def test_list_open_raises_on_404():

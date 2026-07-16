@@ -111,9 +111,12 @@ class VikunjaClient:
         # deployed version's /api/v1/docs (it has changed across releases).
         #
         # Vikunja paginates project-task listings, so a single page can silently drop tasks
-        # once the backlog grows past per_page. We loop until a short (or empty) page tells
-        # us we've reached the end, capping at _LIST_OPEN_MAX_PAGES to avoid ever looping
-        # forever against a misbehaving server.
+        # once the backlog grows past per_page. The server also enforces its own
+        # max_items_per_page (50 by default) regardless of what we request, so a page
+        # shorter than our requested per_page does NOT mean we're done: it just means the
+        # server capped it. The only reliable end-of-list signal is an EMPTY page. We loop
+        # until that happens, capping at _LIST_OPEN_MAX_PAGES to avoid ever looping forever
+        # against a misbehaving server.
         tasks: list[Task] = []
         for page in range(1, _LIST_OPEN_MAX_PAGES + 1):
             resp = self._request(
@@ -130,9 +133,9 @@ class VikunjaClient:
             if resp is None:
                 raise VikunjaError(f"list_open got 404 for project {self._project_id}")
             raw = resp.json() or []
-            tasks.extend(vikunja_to_task(item) for item in raw)
-            if len(raw) < _LIST_OPEN_PAGE_SIZE:
+            if not raw:
                 break
+            tasks.extend(vikunja_to_task(item) for item in raw)
         else:
             _log.warning(
                 "list_open hit the %d-page cap for project %d; results may be incomplete",
