@@ -70,6 +70,12 @@ Nothing here runs automatically. Follow the steps in order, on `jarvis`, over SS
    ```
    `JOLT_DB_PATH` must point at the **new** sidecar file from step 3, not the old
    `jolt.db`, so Jolt does not try to read the old `tasks` table as its sidecar.
+   This path is relative to the container's `WORKDIR` (`/app`), and `./data` is
+   bind-mounted to `/app/data`, so `data/sidecar.db` in `.env` resolves to the same
+   file as `~/docker/jolt/data/sidecar.db` on the host. `docker-compose.yml` does
+   not hardcode `JOLT_DB_PATH`, so this `.env` value is what the container actually
+   reads (Compose's `environment:` would otherwise silently override `env_file:`
+   for the same key).
 
 5. **Deploy.**
    Either push to `main` (the self-hosted runner `gh-runner-jolt` auto-deploys), or
