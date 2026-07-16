@@ -118,24 +118,48 @@ def test_get_task_returns_none_on_404():
     assert c.get_task(99) is None
 
 
-def test_mark_done_posts_done_true():
-    seen = {}
+def test_mark_done_does_read_modify_write():
+    seen = {"requests": []}
+    existing = {
+        "id": 5,
+        "title": "Call the vet",
+        "priority": 4,
+        "due_date": "2026-07-20T21:59:00Z",
+        "done": False,
+    }
 
     def handler(request):
-        seen["method"] = request.method
-        seen["url"] = str(request.url)
-        seen["body"] = json.loads(request.content)
+        if request.method == "GET":
+            seen["requests"].append(("GET", str(request.url)))
+            return httpx.Response(200, json=existing)
+        seen["requests"].append(("POST", str(request.url)))
+        seen["post_body"] = json.loads(request.content)
         return httpx.Response(
             200,
-            json={"id": 5, "title": "x", "done": True, "done_at": "2026-07-16T09:00:00Z"},
+            json={
+                "id": 5,
+                "title": "Call the vet",
+                "priority": 4,
+                "due_date": "2026-07-20T21:59:00Z",
+                "done": True,
+                "done_at": "2026-07-16T09:00:00Z",
+            },
         )
 
     c = _client(handler)
     task = c.mark_done(5)
-    assert seen["method"] == "POST"
-    assert "/api/v1/tasks/5" in seen["url"]
-    assert seen["body"]["done"] is True
+    assert [m for m, _ in seen["requests"]] == ["GET", "POST"]
+    assert all("/api/v1/tasks/5" in url for _, url in seen["requests"])
+    # The full object is round-tripped, not a bare {"done": true}: title/priority survive.
+    assert seen["post_body"]["title"] == "Call the vet"
+    assert seen["post_body"]["priority"] == 4
+    assert seen["post_body"]["done"] is True
     assert task.completed_at is not None
+
+
+def test_mark_done_returns_none_when_task_missing():
+    c = _client(lambda r: httpx.Response(404, json={"message": "not found"}))
+    assert c.mark_done(5) is None
 
 
 def test_delete_task_true_on_success_false_on_404():
@@ -147,6 +171,24 @@ def test_server_error_raises():
     c = _client(lambda r: httpx.Response(500, json={"message": "boom"}))
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
+
+
+def test_list_open_paginates_until_a_short_page():
+    def handler(request):
+        page = int(request.url.params.get("page", "1"))
+        if page == 1:
+            items = [
+                {"id": i, "title": f"t{i}", "priority": 0, "position": i} for i in range(1, 251)
+            ]
+        elif page == 2:
+            items = [{"id": 300, "title": "last", "priority": 0, "position": 300}]
+        else:
+            items = []
+        return httpx.Response(200, json=items)
+
+    c = _client(handler)
+    tasks = c.list_open()
+    assert [t.id for t in tasks] == list(range(1, 251)) + [300]
 
 
 def test_list_open_raises_on_404():

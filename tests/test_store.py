@@ -1,17 +1,18 @@
 from datetime import datetime, timezone
 
 from jolt import sidecar, store
-from jolt.models import PRIORITY_NORMAL, STATUS_PENDING, Task
+from jolt.models import PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
 
 
 class FakeVikunja:
-    def __init__(self, open_tasks=None):
-        self._open = {t.id: t for t in (open_tasks or [])}
+    def __init__(self, open_tasks=None, done_tasks=None):
+        self._tasks = {t.id: t for t in (open_tasks or [])}
+        self._tasks.update({t.id: t for t in (done_tasks or [])})
         self.deleted = []
         self.completed = []
 
     def list_open(self):
-        return list(self._open.values())
+        return [t for t in self._tasks.values() if t.status == STATUS_PENDING]
 
     def create_task(self, text, priority, deadline):
         t = Task(
@@ -25,18 +26,18 @@ class FakeVikunja:
             completed_at=None,
             position=0,
         )
-        self._open[t.id] = t
+        self._tasks[t.id] = t
         return t
 
     def get_task(self, task_id):
-        return self._open.get(task_id)
+        return self._tasks.get(task_id)
 
     def mark_done(self, task_id):
         self.completed.append(task_id)
-        return self._open.get(task_id)
+        return self._tasks.get(task_id)
 
     def delete_task(self, task_id):
-        if task_id in self._open:
+        if task_id in self._tasks:
             self.deleted.append(task_id)
             return True
         return False
@@ -99,3 +100,26 @@ def test_drop_deletes_in_vikunja():
     s, _ = _store(vk)
     assert s.drop_task(1) is True
     assert vk.deleted == [1]
+
+
+def test_complete_already_done_returns_none_and_does_not_call_mark_done():
+    vk = FakeVikunja(done_tasks=[_task(1, status=STATUS_DONE)])
+    s, _ = _store(vk)
+    assert s.complete_task(1, datetime.now(timezone.utc)) is None
+    assert vk.completed == []
+
+
+def test_drop_already_done_returns_false_and_does_not_delete():
+    vk = FakeVikunja(done_tasks=[_task(1, status=STATUS_DONE)])
+    s, _ = _store(vk)
+    assert s.drop_task(1) is False
+    assert vk.deleted == []
+
+
+def test_list_pending_with_empty_result_does_not_prune_nag_state():
+    vk = FakeVikunja([])
+    s, c = _store(vk)
+    when = datetime(2026, 7, 15, 9, 0, tzinfo=timezone.utc)
+    sidecar.set_last_nagged(c, 42, when)
+    assert s.list_pending() == []
+    assert sidecar.last_nagged_map(c) == {42: when}

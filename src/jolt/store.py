@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import date, datetime
 
 from . import sidecar
-from .models import Task
+from .models import STATUS_DONE, Task
 
 
 class Store:
@@ -20,7 +20,11 @@ class Store:
     def list_pending(self) -> list[Task]:
         nagged = sidecar.last_nagged_map(self._conn)
         tasks = [replace(t, last_nagged_at=nagged.get(t.id)) for t in self._vk.list_open()]
-        sidecar.prune(self._conn, {t.id for t in tasks})
+        # An empty result is ambiguous between "truly no open tasks" and a broken
+        # filter/transient glitch. Only prune when we have at least one live task to
+        # prune against, so a flaky response can't wipe everyone's nag state.
+        if tasks:
+            sidecar.prune(self._conn, {t.id for t in tasks})
         return tasks
 
     def get_task(self, task_id: int) -> Task | None:
@@ -31,9 +35,15 @@ class Store:
         return replace(task, last_nagged_at=nagged.get(task.id))
 
     def complete_task(self, task_id: int, now: datetime) -> Task | None:
+        task = self._vk.get_task(task_id)
+        if task is None or task.status == STATUS_DONE:
+            return None
         return self._vk.mark_done(task_id)
 
     def drop_task(self, task_id: int) -> bool:
+        task = self._vk.get_task(task_id)
+        if task is None or task.status == STATUS_DONE:
+            return False
         return self._vk.delete_task(task_id)
 
     def mark_nagged(self, task_id: int, when: datetime) -> None:

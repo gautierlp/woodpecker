@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,11 @@ from .models import (
     Task,
 )
 
+_log = logging.getLogger(__name__)
+
 PRIORITY_IMPORTANT_VALUE = 4
+_LIST_OPEN_PAGE_SIZE = 250
+_LIST_OPEN_MAX_PAGES = 100
 _PARIS = ZoneInfo("Europe/Paris")
 _UTC = ZoneInfo("UTC")
 # Vikunja represents an unset date as year 0001.
@@ -101,27 +106,49 @@ class VikunjaClient:
         # Vikunja returns only undone tasks by default on a project list; the explicit
         # filter guards against that default changing. Verify the filter syntax against the
         # deployed version's /api/v1/docs (it has changed across releases).
-        resp = self._request(
-            "GET",
-            f"/api/v1/projects/{self._project_id}/tasks",
-            params={
-                "filter": "done = false",
-                "sort_by": "position",
-                "order_by": "asc",
-                "per_page": 250,
-            },
-        )
-        if resp is None:
-            raise VikunjaError(f"list_open got 404 for project {self._project_id}")
-        raw = resp.json() or []
-        return [vikunja_to_task(item) for item in raw]
+        #
+        # Vikunja paginates project-task listings, so a single page can silently drop tasks
+        # once the backlog grows past per_page. We loop until a short (or empty) page tells
+        # us we've reached the end, capping at _LIST_OPEN_MAX_PAGES to avoid ever looping
+        # forever against a misbehaving server.
+        tasks: list[Task] = []
+        for page in range(1, _LIST_OPEN_MAX_PAGES + 1):
+            resp = self._request(
+                "GET",
+                f"/api/v1/projects/{self._project_id}/tasks",
+                params={
+                    "filter": "done = false",
+                    "sort_by": "position",
+                    "order_by": "asc",
+                    "per_page": _LIST_OPEN_PAGE_SIZE,
+                    "page": page,
+                },
+            )
+            if resp is None:
+                raise VikunjaError(f"list_open got 404 for project {self._project_id}")
+            raw = resp.json() or []
+            tasks.extend(vikunja_to_task(item) for item in raw)
+            if len(raw) < _LIST_OPEN_PAGE_SIZE:
+                break
+        else:
+            _log.warning(
+                "list_open hit the %d-page cap for project %d; results may be incomplete",
+                _LIST_OPEN_MAX_PAGES,
+                self._project_id,
+            )
+        return tasks
 
     def get_task(self, task_id: int) -> Task | None:
         resp = self._request("GET", f"/api/v1/tasks/{task_id}")
         return vikunja_to_task(resp.json()) if resp is not None else None
 
     def mark_done(self, task_id: int) -> Task | None:
-        resp = self._request("POST", f"/api/v1/tasks/{task_id}", json={"done": True})
+        resp = self._request("GET", f"/api/v1/tasks/{task_id}")
+        if resp is None:
+            return None
+        raw = resp.json()
+        raw["done"] = True
+        resp = self._request("POST", f"/api/v1/tasks/{task_id}", json=raw)
         return vikunja_to_task(resp.json()) if resp is not None else None
 
     def delete_task(self, task_id: int) -> bool:
