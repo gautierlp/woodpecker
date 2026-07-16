@@ -38,7 +38,7 @@ def _parse_due(value: str | None) -> date | None:
 def _due_for(deadline: date | None) -> str | None:
     if deadline is None:
         return None
-    end_of_day = datetime.combine(deadline, time(23, 59), tzinfo=_PARIS)
+    end_of_day = datetime.combine(deadline, time(23, 59, 59), tzinfo=_PARIS)
     return end_of_day.astimezone(_UTC).isoformat().replace("+00:00", "Z")
 
 
@@ -84,7 +84,25 @@ class VikunjaClient:
         )
         self._cached_list_view_id: int | None = None
 
-    def _request(self, method: str, path: str, *, json=None, params=None) -> httpx.Response | None:
+    def close(self) -> None:
+        """Close the underlying HTTP connection pool. Jolt runs as a long-lived process so
+        this is rarely needed there, but it lets callers (and tests) release sockets cleanly."""
+        self._http.close()
+
+    def __enter__(self) -> "VikunjaClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | None = None,
+        params: dict | None = None,
+    ) -> httpx.Response | None:
         # Auth is attached per-request (rather than baked into the httpx.Client at
         # construction) so it still applies even if the client instance is swapped out,
         # e.g. tests replace `_http` with a MockTransport-backed client.

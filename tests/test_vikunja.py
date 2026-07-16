@@ -57,7 +57,8 @@ def test_create_payload_important_with_deadline():
     p = vikunja.task_create_payload("Pay taxes", PRIORITY_IMPORTANT, date(2026, 7, 31))
     assert p["title"] == "Pay taxes"
     assert p["priority"] == 4
-    assert p["due_date"].startswith("2026-07-31T")  # end of day Paris
+    # End of day Paris (23:59:59) expressed in UTC.
+    assert p["due_date"] == "2026-07-31T21:59:59Z"
 
 
 def test_create_payload_no_deadline_omits_field():

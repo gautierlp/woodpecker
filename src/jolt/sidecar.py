@@ -28,7 +28,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def set_last_nagged(conn, task_id: int, when: datetime) -> None:
+def set_last_nagged(conn: sqlite3.Connection, task_id: int, when: datetime) -> None:
     conn.execute(
         "INSERT INTO nag_state (task_id, last_nagged_at) VALUES (?, ?) "
         "ON CONFLICT(task_id) DO UPDATE SET last_nagged_at = excluded.last_nagged_at",
@@ -37,12 +37,12 @@ def set_last_nagged(conn, task_id: int, when: datetime) -> None:
     conn.commit()
 
 
-def last_nagged_map(conn) -> dict[int, datetime]:
+def last_nagged_map(conn: sqlite3.Connection) -> dict[int, datetime]:
     rows = conn.execute("SELECT task_id, last_nagged_at FROM nag_state").fetchall()
     return {row["task_id"]: datetime.fromisoformat(row["last_nagged_at"]) for row in rows}
 
 
-def save_display(conn, chat_id: int, task_ids: list[int]) -> None:
+def save_display(conn: sqlite3.Connection, chat_id: int, task_ids: list[int]) -> None:
     conn.execute(
         "INSERT INTO display_snapshot (chat_id, task_ids) VALUES (?, ?) "
         "ON CONFLICT(chat_id) DO UPDATE SET task_ids = excluded.task_ids",
@@ -51,7 +51,7 @@ def save_display(conn, chat_id: int, task_ids: list[int]) -> None:
     conn.commit()
 
 
-def load_display(conn, chat_id: int) -> list[int] | None:
+def load_display(conn: sqlite3.Connection, chat_id: int) -> list[int] | None:
     row = conn.execute(
         "SELECT task_ids FROM display_snapshot WHERE chat_id = ?", (chat_id,)
     ).fetchone()
@@ -61,7 +61,7 @@ def load_display(conn, chat_id: int) -> list[int] | None:
     return [int(part) for part in raw.split(",")] if raw else []
 
 
-def prune(conn, live_ids: set[int]) -> None:
+def prune(conn: sqlite3.Connection, live_ids: set[int]) -> None:
     ids = {int(r["task_id"]) for r in conn.execute("SELECT task_id FROM nag_state")}
     stale = ids - live_ids
     if stale:
