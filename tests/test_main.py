@@ -2,6 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 from jolt import main
+from jolt.store import Store
 
 
 def _file_handlers(handlers):
@@ -56,3 +57,107 @@ def test_build_log_handlers_omits_file_when_disabled(monkeypatch):
 
     assert not _file_handlers(handlers)
     assert _console_handlers(handlers)
+
+
+class _FakeApplication:
+    """Stands in for telegram.ext.Application: main() only needs bot_data, the two
+    add_handler-style calls, and a run_polling it must not actually block on."""
+
+    def __init__(self):
+        self.bot_data = {}
+        self.handlers = []
+        self.error_handlers = []
+        self.ran_polling = False
+
+    def add_handler(self, handler):
+        self.handlers.append(handler)
+
+    def add_error_handler(self, handler):
+        self.error_handlers.append(handler)
+
+    def run_polling(self):
+        self.ran_polling = True
+
+
+class _FakeApplicationBuilder:
+    """Mimics Application.builder().token(...).post_init(...).build() without touching
+    the network."""
+
+    def __init__(self, application):
+        self._application = application
+
+    def token(self, _token):
+        return self
+
+    def post_init(self, _post_init):
+        return self
+
+    def build(self):
+        return self._application
+
+
+def test_main_wires_vikunja_backed_store_into_bot_data(tmp_path, monkeypatch):
+    # The Task 8 refactor made main() build a VikunjaClient + Store on top of the sidecar
+    # connection and stash the Store in application.bot_data. Every external boundary
+    # (env config, sidecar, Vikunja HTTP client, Telegram Application, log setup) is
+    # mocked so this exercises only main()'s wiring, not real connections or polling.
+    db_path = tmp_path / "jolt.db"
+    env = {
+        "TELEGRAM_BOT_TOKEN": "test-token",
+        "TELEGRAM_CHAT_ID": "42",
+        "ANTHROPIC_API_KEY": "test-anthropic-key",
+        "VIKUNJA_URL": "https://vikunja.example.com",
+        "VIKUNJA_TOKEN": "test-vikunja-token",
+        "VIKUNJA_PROJECT_ID": "7",
+        "JOLT_LOG_FILE": "",
+        "JOLT_DB_PATH": str(db_path),
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.setattr(main, "setup_logging", lambda: None)
+
+    fake_conn = object()
+    connect_calls = []
+    init_db_calls = []
+    monkeypatch.setattr(
+        main.sidecar, "connect", lambda path: connect_calls.append(path) or fake_conn
+    )
+    monkeypatch.setattr(main.sidecar, "init_db", lambda conn: init_db_calls.append(conn))
+
+    vikunja_calls = []
+    vikunja_instances = []
+
+    class _FakeVikunjaClient:
+        def __init__(self, base_url, token, project_id):
+            vikunja_calls.append((base_url, token, project_id))
+            vikunja_instances.append(self)
+
+    monkeypatch.setattr(main, "VikunjaClient", _FakeVikunjaClient)
+    monkeypatch.setattr(main.llm, "build_client", lambda api_key: "fake-anthropic-client")
+
+    fake_application = _FakeApplication()
+    monkeypatch.setattr(
+        main,
+        "Application",
+        type(
+            "_Application",
+            (),
+            {"builder": staticmethod(lambda: _FakeApplicationBuilder(fake_application))},
+        ),
+    )
+
+    main.main()
+
+    # The Vikunja client was built from config, not hardcoded values.
+    assert vikunja_calls == [("https://vikunja.example.com", "test-vikunja-token", 7)]
+    # The sidecar connection feeding the Store is the one main() opened and initialized.
+    assert connect_calls == [str(db_path)]
+    assert init_db_calls == [fake_conn]
+
+    store = fake_application.bot_data["store"]
+    assert isinstance(store, Store)
+    # Argument order matters: Store(vikunja, sidecar_conn), not the other way around.
+    assert store._vk is vikunja_instances[0]
+    assert store._conn is fake_conn
+    assert fake_application.ran_polling

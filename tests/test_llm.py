@@ -116,21 +116,6 @@ def test_backlog_in_prompt_shows_positions_without_leaking_ids():
     assert "id=41" not in system
 
 
-def test_interpret_message_resolves_block_positions_to_ids():
-    # The heart of the fix: the LLM outputs the numbers the user typed (list positions);
-    # deterministic code maps them to the real db ids the orchestrator acts on. Here the
-    # backlog is three tasks with gappy ids, so positions 2/3 -> ids 45/46.
-    tasks = [_ordered_task(7, 1), _ordered_task(45, 2), _ordered_task(46, 3)]
-    block = SimpleNamespace(
-        type="tool_use",
-        name="record_intent",
-        input={"action": "block", "task_id": 3, "blocked_by": 2},
-    )
-    client = FakeClient(SimpleNamespace(content=[block]))
-    intents = llm.interpret_message("3 blocked by 2", tasks, NOW, client)
-    assert (intents[0].task_id, intents[0].blocked_by) == (46, 45)
-
-
 def test_interpret_message_resolves_complete_position_to_id():
     tasks = [_ordered_task(7, 1), _ordered_task(45, 2)]
     complete = SimpleNamespace(
@@ -213,12 +198,12 @@ def test_interpret_message_sends_history_before_current_message():
     tool_block = SimpleNamespace(
         type="tool_use",
         name="record_intent",
-        input={"action": "block", "task_id": 32, "blocked_by": 31},
+        input={"action": "complete", "task_id": 1},
     )
     client = FakeClient(SimpleNamespace(content=[tool_block]))
     history = [
-        {"role": "user", "content": "is 32 blocked by 31?"},
-        {"role": "assistant", "content": "Not currently. Want me to set that up?"},
+        {"role": "user", "content": "is 1 done yet?"},
+        {"role": "assistant", "content": "Not yet. Want me to mark it done?"},
     ]
     llm.interpret_message("Yes", [_task()], NOW, client, history=history)
     messages = client.messages.calls[0]["messages"]
@@ -520,118 +505,6 @@ def test_write_nag_normal_is_drop_leaning():
     assert "drop" in system or "still want" in system or "add it today" in system
 
 
-def test_parse_block_intent():
-    intent = llm.parse_intent({"action": "block", "task_id": 1, "blocked_by": 3})
-    assert intent.action == "block"
-    assert intent.task_id == 1
-    assert intent.blocked_by == 3
-
-
-def test_parse_unblock_intent():
-    intent = llm.parse_intent({"action": "unblock", "task_id": 2})
-    assert intent.action == "unblock"
-    assert intent.task_id == 2
-    assert intent.blocked_by is None
-
-
-def test_tool_enum_includes_block_and_unblock():
-    actions = llm._TOOL["input_schema"]["properties"]["action"]["enum"]
-    assert "block" in actions
-    assert "unblock" in actions
-
-
-def test_prompt_mentions_dependencies():
-    tool_block = SimpleNamespace(
-        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
-    )
-    client = FakeClient(SimpleNamespace(content=[tool_block]))
-    llm.interpret_message("x", [], NOW, client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "block" in system
-
-
-def test_interpret_message_maps_dependency_to_two_block_intents():
-    # "1 and 2 need 3 first" must become one block intent per blocked task, each with its
-    # positions resolved to ids. Positions 1/2/3 -> ids 11/12/13 here.
-    tasks = [_ordered_task(11, 1), _ordered_task(12, 2), _ordered_task(13, 3)]
-    blocks = [
-        SimpleNamespace(
-            type="tool_use",
-            name="record_intent",
-            input={"action": "block", "task_id": 1, "blocked_by": 3},
-        ),
-        SimpleNamespace(
-            type="tool_use",
-            name="record_intent",
-            input={"action": "block", "task_id": 2, "blocked_by": 3},
-        ),
-    ]
-    client = FakeClient(SimpleNamespace(content=blocks))
-    intents = llm.interpret_message("1 and 2 need 3 first", tasks, NOW, client)
-    assert [(i.action, i.task_id, i.blocked_by) for i in intents] == [
-        ("block", 11, 13),
-        ("block", 12, 13),
-    ]
-
-
-def test_parse_edit_intent_with_deadline():
-    intent = llm.parse_intent({"action": "edit", "task_id": 4, "deadline": "2026-07-12"})
-    assert intent.action == "edit"
-    assert intent.task_id == 4
-    assert intent.deadline == date(2026, 7, 12)
-    assert intent.clear_deadline is False
-
-
-def test_parse_edit_intent_with_clear_deadline():
-    intent = llm.parse_intent({"action": "edit", "task_id": 4, "clear_deadline": True})
-    assert intent.action == "edit"
-    assert intent.clear_deadline is True
-    assert intent.deadline is None
-
-
-def test_tool_enum_includes_edit():
-    actions = llm._TOOL["input_schema"]["properties"]["action"]["enum"]
-    assert "edit" in actions
-
-
-def test_tool_schema_exposes_clear_deadline():
-    assert "clear_deadline" in llm._TOOL["input_schema"]["properties"]
-
-
-def test_prompt_mentions_edit():
-    tool_block = SimpleNamespace(
-        type="tool_use", name="record_intent", input={"action": "add", "text": "x"}
-    )
-    client = FakeClient(SimpleNamespace(content=[tool_block]))
-    llm.interpret_message("x", [], NOW, client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "edit" in system
-
-
-def test_interpret_message_maps_bulk_reschedule_to_edit_per_task():
-    # "change all due dates to today" -> one edit intent per pending task, each with today.
-    blocks = [
-        SimpleNamespace(
-            type="tool_use",
-            name="record_intent",
-            input={"action": "edit", "task_id": 1, "deadline": "2026-07-12"},
-        ),
-        SimpleNamespace(
-            type="tool_use",
-            name="record_intent",
-            input={"action": "edit", "task_id": 2, "deadline": "2026-07-12"},
-        ),
-    ]
-    client = FakeClient(SimpleNamespace(content=blocks))
-    intents = llm.interpret_message(
-        "change all due dates to today", [_task(1), _task(2)], NOW, client
-    )
-    assert [(i.action, i.task_id, i.deadline) for i in intents] == [
-        ("edit", 1, date(2026, 7, 12)),
-        ("edit", 2, date(2026, 7, 12)),
-    ]
-
-
 def test_write_focus_leans_drop_for_low_value_rescue():
     # A normal (low-value) rescue should be framed as "still worth keeping?", not
     # "what is blocking it?", so the morning digest matches the drop-leaning nag stance.
@@ -725,89 +598,17 @@ def test_truncation_note_when_no_block_parses():
     assert "too long" in intents[0].reply.lower()
 
 
-def test_parse_merge_with_merge_from():
-    intent = llm.parse_intent(
-        {"action": "merge", "task_id": 2, "merge_from": 5, "text": "combined task text"}
-    )
-    assert intent.action == "merge"
-    assert intent.task_id == 2
-    assert intent.merge_from == 5
-    assert intent.text == "combined task text"
-
-
-def test_tool_schema_supports_merge():
-    assert "merge" in llm._TOOL["input_schema"]["properties"]["action"]["enum"]
-    assert "merge_from" in llm._TOOL["input_schema"]["properties"]
-
-
-def test_resolve_positions_resolves_merge_from():
-    tasks = [_task(id=10), _task(id=20)]
-    display_ids = [10, 20]
-    intent = llm.Intent(action="merge", task_id=1, merge_from=2, text="combined")
-    resolved = llm._resolve_positions(
-        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
-    )
-    assert resolved[0].action == "merge"
-    assert resolved[0].task_id == 10
-    assert resolved[0].merge_from == 20
-
-
-def test_resolve_positions_out_of_range_merge_from_clarifies():
+def test_resolve_positions_ignores_stray_task_id_on_add():
+    # The model intermittently sprays a stray task_id onto an add that never uses it.
+    # That number is often out of range, and validating it used to reject the whole add
+    # as "task not found", losing the task the user asked to add. An add must survive
+    # regardless, with the noise cleared.
     tasks = [_task(id=10)]
     display_ids = [10]
-    intent = llm.Intent(action="merge", task_id=1, merge_from=9, text="combined")
-    resolved = llm._resolve_positions(
-        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
-    )
-    assert resolved[0].action == "answer"
-    assert "9" in resolved[0].reply
-    assert resolved[0].merge_from is None
-
-
-def test_resolve_positions_ignores_stray_ids_on_add():
-    # The model intermittently sprays position numbers onto an add (a stray task_id,
-    # blocked_by or merge_from) that the add never uses. Those numbers are often out of
-    # range, and validating them used to reject the whole add as "task not found", losing
-    # the task the user asked to add. An add must survive regardless, with the noise cleared.
-    tasks = [_task(id=10)]
-    display_ids = [10]
-    intent = llm.Intent(
-        action="add", text="buy olive oil", task_id=37, blocked_by=37, merge_from=37
-    )
+    intent = llm.Intent(action="add", text="buy olive oil", task_id=37)
     resolved = llm._resolve_positions(
         [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
     )
     assert resolved[0].action == "add"
     assert resolved[0].text == "buy olive oil"
     assert resolved[0].task_id is None
-    assert resolved[0].blocked_by is None
-    assert resolved[0].merge_from is None
-
-
-def test_resolve_positions_ignores_stray_blocked_by_on_edit():
-    # An edit only acts on task_id; a stray blocked_by the model tacked on must not turn a
-    # valid edit into a clarification and lose the change.
-    tasks = [_task(id=10)]
-    display_ids = [10]
-    intent = llm.Intent(action="edit", task_id=1, blocked_by=99, deadline=date(2026, 7, 14))
-    resolved = llm._resolve_positions(
-        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
-    )
-    assert resolved[0].action == "edit"
-    assert resolved[0].task_id == 10
-    assert resolved[0].blocked_by is None
-    assert resolved[0].deadline == date(2026, 7, 14)
-
-
-def test_resolve_positions_dedupes_repeated_missing_numbers():
-    # A block that names the same out-of-range number for both fields must read "9", not
-    # the old "9 or 9 or 9".
-    tasks = [_task(id=10)]
-    display_ids = [10]
-    intent = llm.Intent(action="block", task_id=9, blocked_by=9)
-    resolved = llm._resolve_positions(
-        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
-    )
-    assert resolved[0].action == "answer"
-    assert "9 or 9" not in resolved[0].reply
-    assert "9" in resolved[0].reply

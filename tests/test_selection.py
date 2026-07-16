@@ -21,7 +21,7 @@ def make(
     deadline=None,
     created=NOW,
     status=STATUS_PENDING,
-    blocked_by=None,
+    position=0,
     nagged=None,
 ):
     return Task(
@@ -33,8 +33,28 @@ def make(
         status=status,
         last_nagged_at=nagged,
         completed_at=None,
-        blocked_by=blocked_by,
+        position=position,
     )
+
+
+def _t(id, position, created="2026-07-10T08:00:00+00:00"):
+    return Task(
+        id=id,
+        text=f"t{id}",
+        priority=PRIORITY_NORMAL,
+        deadline=None,
+        created_at=datetime.fromisoformat(created),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+        position=position,
+    )
+
+
+def test_position_breaks_ties_when_priority_and_deadline_equal():
+    tasks = [_t(1, position=5), _t(2, position=1), _t(3, position=3)]
+    ordered = selection.order_backlog(tasks)
+    assert [t.id for t in ordered] == [2, 3, 1]
 
 
 def test_important_sorts_before_normal():
@@ -116,48 +136,6 @@ def test_quiet_hours():
     assert selection.is_quiet_hours(datetime(2026, 7, 12, 23, tzinfo=TZ)) is True
 
 
-def test_is_blocked_true_when_blocker_pending():
-    blocker = make(1)
-    dep = make(2, blocked_by=1)
-    assert selection.is_blocked(dep, [blocker, dep]) is True
-
-
-def test_is_blocked_false_when_blocker_done():
-    blocker = make(1, status=STATUS_DONE)
-    dep = make(2, blocked_by=1)
-    assert selection.is_blocked(dep, [blocker, dep]) is False
-
-
-def test_is_blocked_false_when_not_blocked():
-    assert selection.is_blocked(make(1), [make(1)]) is False
-
-
-def test_blocked_task_sorts_directly_below_its_blocker():
-    # An important, near-deadline blocked task would normally sort to the top, but it
-    # must appear right after its blocker instead.
-    blocker = make(1, priority=PRIORITY_NORMAL, created=NOW)
-    dep = make(2, priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 13), blocked_by=1)
-    other = make(3, priority=PRIORITY_NORMAL, created=NOW)
-    ordered = [t.id for t in selection.order_backlog([dep, blocker, other])]
-    assert ordered.index(2) == ordered.index(1) + 1  # dep is immediately after blocker
-
-
-def test_blocked_task_is_not_selected_as_focus():
-    # The blocked task is important + stale (would normally lead); the blocker is fresh
-    # and normal. Focus must still land on the actionable blocker.
-    blocker = make(1, priority=PRIORITY_NORMAL, created=NOW)
-    dep = make(2, priority=PRIORITY_IMPORTANT, created=NOW - timedelta(days=5), blocked_by=1)
-    result = selection.select_daily_focus([blocker, dep], NOW)
-    assert result.focus.id == 1
-
-
-def test_blocked_task_is_not_a_rescue():
-    blocker = make(1, priority=PRIORITY_IMPORTANT, created=NOW)
-    stale_dep = make(2, created=NOW - timedelta(days=5), blocked_by=1)
-    result = selection.select_daily_focus([blocker, stale_dep], NOW)
-    assert 2 not in [t.id for t in result.rescues]
-
-
 def test_nag_stance_start_for_important():
     assert selection.nag_stance(make(1, priority=PRIORITY_IMPORTANT)) == "start"
 
@@ -199,13 +177,6 @@ def test_slow_resurface_prefers_never_nagged():
     assert selection.select_slow_resurface([never, nagged_long_ago], NOW).id == 1
 
 
-def test_slow_resurface_ignores_blocked_task():
-    blocker = make(1, created=NOW - timedelta(days=5))
-    dep = make(2, created=NOW - timedelta(days=5), blocked_by=1)
-    # exclude the blocker as the focus; the only other candidate (dep) is blocked -> None
-    assert selection.select_slow_resurface([blocker, dep], NOW, exclude_id=1) is None
-
-
 def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     from jolt import config, selection
 
@@ -213,7 +184,13 @@ def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     created = now - timedelta(days=10)  # stale
     last_nagged = now - timedelta(days=config.SLOW_RESURFACE_DAYS)  # exactly the cadence
     task = Task(
-        id=1, text="sort photos", priority=PRIORITY_NORMAL, deadline=None,
-        created_at=created, status=STATUS_PENDING, last_nagged_at=last_nagged, completed_at=None,
+        id=1,
+        text="sort photos",
+        priority=PRIORITY_NORMAL,
+        deadline=None,
+        created_at=created,
+        status=STATUS_PENDING,
+        last_nagged_at=last_nagged,
+        completed_at=None,
     )
     assert selection.select_slow_resurface([task], now) is task

@@ -5,7 +5,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      JOLT_DB_PATH: /app/data/jolt.db
+      # JOLT_DB_PATH is intentionally NOT set here: environment: overrides env_file:
+      # for the same key in Compose, so hardcoding it would make the .env value
+      # (and the cutover runbook's step to edit it) silently ineffective. It comes
+      # from .env instead, container-relative to the ./data mount below.
       # A persistent log file on the ./logs mount below, so history survives redeploys
       # (a recreated container otherwise loses its own stdout). Kept out of ./data so it
       # is not swept into the nightly restic backup.
@@ -13,5 +16,16 @@ services:
       # DEBUG traces message bodies and full Claude I/O; flip to INFO to quieten.
       JOLT_LOG_LEVEL: DEBUG
     volumes:
+      # ./data now holds only the sidecar SQLite (nag state + display snapshot);
+      # the task backlog itself lives in Vikunja, not on this bind mount.
       - ./data:/app/data
       - ./logs:/app/logs
+    # Join the shared NPM network so jolt can reach Vikunja by container name
+    # (VIKUNJA_URL=http://vikunja:3456), keeping task traffic internal to the host.
+    networks:
+      - default
+      - npm
+networks:
+  npm:
+    external: true
+    name: nginx-proxy-manager_default

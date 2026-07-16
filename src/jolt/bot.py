@@ -1,6 +1,7 @@
 import logging
 
-from . import config, db, llm, orchestrator, render
+from . import config, llm, orchestrator, render
+from .vikunja import VikunjaError
 
 logger = logging.getLogger(__name__)
 
@@ -36,28 +37,53 @@ async def handle_message(update, context) -> None:
     if update.effective_chat.id != chat_id:
         logger.warning("Ignoring message from unauthorized chat %s", update.effective_chat.id)
         return
-    conn = context.bot_data["conn"]
+    store = context.bot_data["store"]
     client = context.bot_data["client"]
     memory = context.bot_data["memory"]
     now = config.now_paris()
     text = update.message.text or ""
     logger.info("Received message (%d chars)", len(text))
     logger.debug("Inbound message body: %s", text)
-    tasks = db.list_all(conn)
-    history = memory.get(chat_id)
-    outbound = memory.get_outbound(chat_id)
-    display_ids = db.load_display(conn, chat_id)
-    intents = llm.interpret_message(
-        text, tasks, now, client, history=history, recent_outbound=outbound, display_ids=display_ids
-    )
-    logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
-    reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
-    logger.debug("Reply body: %s", reply)
-    # If we just printed the backlog, remember the exact order shown, so the numbers in
-    # the next message resolve against this list rather than a later, shifted order.
-    if any(intent.action == "list" for intent in intents):
-        shown = render.display_order(db.list_all(conn), now)
-        db.save_display(conn, chat_id, [t.id for t in shown])
+    try:
+        tasks = store.list_pending()
+        history = memory.get(chat_id)
+        outbound = memory.get_outbound(chat_id)
+        display_ids = store.load_display(chat_id)
+        intents = llm.interpret_message(
+            text,
+            tasks,
+            now,
+            client,
+            history=history,
+            recent_outbound=outbound,
+            display_ids=display_ids,
+        )
+        logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
+        # A "list" intent needs a snapshot of the backlog to both render the reply and
+        # save as the display order for the next message's numbered references. Fetch it
+        # once, at the point the intent is processed (so any earlier intents in this same
+        # batch have already mutated the backlog), and reuse it for both instead of
+        # letting each step fetch its own copy.
+        replies = []
+        shown = None
+        for intent in intents:
+            if intent.action == "list":
+                shown = store.list_pending()
+                replies.append(render.render_backlog(shown, now))
+            else:
+                replies.append(orchestrator.apply_intent(store, intent, now))
+        reply = "\n".join(replies)
+        logger.debug("Reply body: %s", reply)
+        # If we just printed the backlog, remember the exact order shown, so the numbers in
+        # the next message resolve against this list rather than a later, shifted order.
+        if shown is not None:
+            store.save_display(chat_id, [t.id for t in render.display_order(shown, now)])
+    except VikunjaError:
+        logger.exception("Vikunja unreachable while handling message")
+        await update.message.reply_text(
+            "My task list is unreachable right now, try again in a moment."
+        )
+        return
     memory.add(chat_id, text, reply)
     # The pending nag has now been answered (or superseded by real conversation), so
     # it must not colour the next, unrelated message.

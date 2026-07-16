@@ -49,10 +49,7 @@ class Intent:
     priority: str | None = None
     deadline: date | None = None
     task_id: int | None = None
-    blocked_by: int | None = None
-    merge_from: int | None = None
     reply: str | None = None
-    clear_deadline: bool = False
 
 
 def parse_intent(tool_input: dict) -> Intent:
@@ -63,10 +60,7 @@ def parse_intent(tool_input: dict) -> Intent:
         priority=tool_input.get("priority"),
         deadline=date.fromisoformat(deadline) if deadline else None,
         task_id=tool_input.get("task_id"),
-        blocked_by=tool_input.get("blocked_by"),
-        merge_from=tool_input.get("merge_from"),
         reply=tool_input.get("reply"),
-        clear_deadline=tool_input.get("clear_deadline", False),
     )
 
 
@@ -87,25 +81,14 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": [
-                    "add",
-                    "complete",
-                    "drop",
-                    "edit",
-                    "block",
-                    "unblock",
-                    "merge",
-                    "list",
-                    "answer",
-                ],
-                "description": "add a task, complete/drop an existing one, edit an existing task's deadline/priority/text, block a task on another / unblock it, merge two tasks into one, list the backlog, or answer a question / reply to the user.",
+                "enum": ["add", "complete", "drop", "list", "answer"],
+                "description": "add a task, complete/drop an existing one, list the backlog, "
+                "or answer a question / reply to the user.",
             },
             "text": {
                 "type": "string",
                 "description": "The task's wording. This is the ONLY field a task's text ever goes "
-                "in, never reply. For action=add, the new task. For action=edit, the reworded "
-                "text (when the user finished part of a multi-part task, keep only the parts still "
-                "to do). For action=merge, the combined text of the kept task.",
+                "in, never reply. For action=add, the new task.",
             },
             "priority": {
                 "type": "string",
@@ -114,36 +97,19 @@ _TOOL = {
             },
             "deadline": {
                 "type": "string",
-                "description": "The task's due date as an ISO YYYY-MM-DD date, for action=add or "
-                "action=edit. Fill this whenever the user gives a deadline, including relative "
-                "ones (today, tomorrow, Wednesday, next week): resolve them to an ISO date. For "
-                "'move to tomorrow' or 'deadline should be tomorrow' on an existing task, this is "
-                "the field that carries the new date. Leave unset only when there is no deadline.",
+                "description": "The task's due date as an ISO YYYY-MM-DD date, for action=add. "
+                "Fill this whenever the user gives a deadline, including relative "
+                "ones (today, tomorrow, Wednesday, next week): resolve them to an ISO date. "
+                "Leave unset only when there is no deadline.",
             },
             "task_id": {
                 "type": "integer",
-                "description": "The backlog number shown for the existing task, for "
-                "complete/drop/edit/block.",
-            },
-            "blocked_by": {
-                "type": "integer",
-                "description": "For action=block: the backlog number of the prerequisite task "
-                "that must be finished first.",
-            },
-            "merge_from": {
-                "type": "integer",
-                "description": "For action=merge: the backlog number of the task to fold into "
-                "task_id. task_id is the task that remains; put the combined text in the text field.",
+                "description": "The backlog number shown for the existing task, for complete/drop.",
             },
             "reply": {
                 "type": "string",
                 "description": "For action=answer ONLY: the exact message to send back to the "
-                "user. Never put a task's wording or a reworded edit here; that always goes in "
-                "text.",
-            },
-            "clear_deadline": {
-                "type": "boolean",
-                "description": "For action=edit only: set true to remove a task's due date entirely. Leave unset to keep the current due date.",
+                "user. Never put a task's wording here; that always goes in text.",
             },
         },
         "required": ["action"],
@@ -184,19 +150,15 @@ def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime)
 
 
 # Which position-numbered id fields each action actually acts on. Anything not listed is
-# noise the model sometimes sprays onto an intent (a stray task_id on an add, a stray
-# blocked_by on an edit). We only validate and resolve the fields the action uses;
-# validating the rest would reject a perfectly good intent over a number it was never
-# going to touch. Actions absent from this map (add, list, answer) use no position number.
+# noise the model sometimes sprays onto an intent (a stray task_id on an add). We only
+# validate and resolve the fields the action uses; validating the rest would reject a
+# perfectly good intent over a number it was never going to touch. Actions absent from
+# this map (add, list, answer) use no position number.
 _ID_FIELDS = {
     "complete": ("task_id",),
     "drop": ("task_id",),
-    "edit": ("task_id",),
-    "unblock": ("task_id",),
-    "block": ("task_id", "blocked_by"),
-    "merge": ("task_id", "merge_from"),
 }
-_ALL_ID_FIELDS = ("task_id", "blocked_by", "merge_from")
+_ALL_ID_FIELDS = ("task_id",)
 
 
 def _resolve_positions(
@@ -233,8 +195,6 @@ def _resolve_positions(
                     reply=f"I don't have a task numbered {numbers} on the current list. "
                     "Send 'list' to see the current numbers.",
                     task_id=None,
-                    blocked_by=None,
-                    merge_from=None,
                 )
             )
             continue
@@ -256,45 +216,26 @@ def interpret_message(
         "You are Jolt, a personal accountability bot. Read the user's message and record "
         "what it means by calling record_intent. A single message can contain several things "
         "at once (for example a pasted list of tasks); call record_intent once per distinct "
-        "task or action. When adding tasks, never fold several into one add; but when the user "
-        "explicitly asks to combine or group existing tasks, use action=merge (see below). "
+        "task or action. When adding tasks, never fold several into one add. "
         "When adding a task, judge its "
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. In the backlog below each "
         "task is listed as 'number: text', where the number is what the user sees. To act on a "
-        "task (complete, drop, edit, block), pass that exact number as task_id (and as "
-        "blocked_by for a prerequisite): the user's '2' in 'complete 2' or '34 blocks 35' is "
-        "that number. These numbers are only valid for the backlog shown right now: the list is "
-        "renumbered whenever a task is completed or added, so a number that appeared in an earlier "
-        "turn of this conversation may now point to a different task. Never reinterpret or quote a "
-        "number from an earlier turn against the current backlog; when you refer back to something "
-        "discussed earlier, name the task by its text, not by its number. "
+        "task (complete, drop), pass that exact number as task_id: the user's '2' in "
+        "'complete 2' is that number. These numbers are only valid for the backlog shown right "
+        "now: the list is renumbered whenever a task is completed or added, so a number that "
+        "appeared in an earlier turn of this conversation may now point to a different task. "
+        "Never reinterpret or quote a number from an earlier turn against the current backlog; "
+        "when you refer back to something discussed earlier, name the task by its text, not by "
+        "its number. "
         "When the user describes a task in words rather than typing a number, match it to the "
         "backlog line by its text and use that line's number; only treat a bare number as task_id "
-        "when the user actually typed that number. When the user says one task must "
-        "happen before another (for example 'X needs Y first', 'can't do X until Y', 'Y blocks X'), "
-        "call record_intent with action=block, task_id = the task that is blocked and blocked_by = "
-        "the prerequisite task's number; emit one block call per blocked task. To lift a dependency, use "
-        "action=unblock with the task_id. "
-        "When the user asks to combine, group, or merge two tasks, or says two entries are really "
-        "the same task, call record_intent with action=merge: task_id = the task to keep, "
-        "merge_from = the other task's number, and text = the combined text for the kept task. "
-        "Only merge when they ask to combine existing tasks, not when they describe a dependency. "
-        "To change an existing task rather than add a new one, use action=edit with its task_id "
-        "and only the fields that change: a new deadline, a new priority (normal/important), or "
-        "reworded text. Prefer edit over dropping and re-adding, so the task keeps its age. "
-        "When the user reports that only part of a multi-part or checklist task is done (for "
-        "example 'shower and teeth are done' about 'Groom Rex: shower, wash ears, brush teeth'), "
-        "do not mark the whole task complete and do not leave it unchanged: use action=edit with "
-        "text reworded to keep only what is still left (here, 'Groom Rex: wash ears'). If every "
-        "part is now done, use action=complete instead. To "
-        "remove a due date entirely, use action=edit with clear_deadline=true. A message like "
-        "'change all due dates to today' becomes one edit call per pending task. "
+        "when the user actually typed that number. "
         "You may be given earlier turns of this conversation before the latest message. Use them to "
         "resolve short follow-ups: if your previous turn offered to do something and the user replies "
         "'yes', 'do it', 'the first one' and the like, treat it as confirming that action and record "
-        "the concrete intent (for example the block you proposed), not a contextless answer. "
-        "For a question or a blocker conversation, use "
+        "the concrete intent, not a contextless answer. "
+        "For a question or any other conversation, use "
         "action=answer and write a short, plain reply, no cheerleading. The user may "
         "write in any language, but always store the task text in English (translate it if needed). "
         "Never use an em dash (the '—' character) in your reply. Use a comma, a colon, or a period "
