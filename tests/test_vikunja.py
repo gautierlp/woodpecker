@@ -91,6 +91,12 @@ def test_create_task_posts_payload_and_returns_task():
     assert task.id == 5
 
 
+def test_create_task_raises_on_404():
+    c = _client(lambda r: httpx.Response(404, json={"message": "project not found"}))
+    with pytest.raises(vikunja.VikunjaError):
+        c.create_task("Pay taxes", PRIORITY_NORMAL, None)
+
+
 def test_list_open_maps_all_returned_tasks():
     def handler(request):
         return httpx.Response(

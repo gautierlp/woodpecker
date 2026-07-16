@@ -93,6 +93,8 @@ class VikunjaClient:
     def create_task(self, text: str, priority: str, deadline: date | None) -> Task:
         payload = task_create_payload(text, priority, deadline)
         resp = self._request("PUT", f"/api/v1/projects/{self._project_id}/tasks", json=payload)
+        if resp is None:
+            raise VikunjaError(f"create_task got 404 for project {self._project_id}")
         return vikunja_to_task(resp.json())
 
     def list_open(self) -> list[Task]:
