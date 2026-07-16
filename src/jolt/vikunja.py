@@ -82,6 +82,7 @@ class VikunjaClient:
             base_url=base_url.rstrip("/"),
             timeout=timeout,
         )
+        self._cached_list_view_id: int | None = None
 
     def _request(self, method: str, path: str, *, json=None, params=None) -> httpx.Response | None:
         # Auth is attached per-request (rather than baked into the httpx.Client at
@@ -105,6 +106,24 @@ class VikunjaClient:
             raise VikunjaError(f"create_task got 404 for project {self._project_id}")
         return vikunja_to_task(resp.json())
 
+    def _list_view_id(self) -> int:
+        # Vikunja 2.x makes "position" a per-VIEW concept (not per-project), and
+        # /projects/{id}/tasks?sort_by=position 400s with "You must provide a project
+        # view ID when sorting by position". So the list endpoint must be addressed
+        # through a specific view. We discover the project's list view once and cache
+        # it on the client instance, since it does not change during a run.
+        if self._cached_list_view_id is not None:
+            return self._cached_list_view_id
+        resp = self._request("GET", f"/api/v1/projects/{self._project_id}/views")
+        if resp is None:
+            raise VikunjaError(f"list views got 404 for project {self._project_id}")
+        views = resp.json() or []
+        if not views:
+            raise VikunjaError(f"project {self._project_id} has no views")
+        view = next((v for v in views if v.get("view_kind") == "list"), views[0])
+        self._cached_list_view_id = view["id"]
+        return self._cached_list_view_id
+
     def list_open(self) -> list[Task]:
         # Vikunja returns only undone tasks by default on a project list; the explicit
         # filter guards against that default changing. Verify the filter syntax against the
@@ -117,11 +136,12 @@ class VikunjaClient:
         # server capped it. The only reliable end-of-list signal is an EMPTY page. We loop
         # until that happens, capping at _LIST_OPEN_MAX_PAGES to avoid ever looping forever
         # against a misbehaving server.
+        view_id = self._list_view_id()
         tasks: list[Task] = []
         for page in range(1, _LIST_OPEN_MAX_PAGES + 1):
             resp = self._request(
                 "GET",
-                f"/api/v1/projects/{self._project_id}/tasks",
+                f"/api/v1/projects/{self._project_id}/views/{view_id}/tasks",
                 params={
                     "filter": "done = false",
                     "sort_by": "position",

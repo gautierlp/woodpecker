@@ -97,23 +97,63 @@ def test_create_task_raises_on_404():
         c.create_task("Pay taxes", PRIORITY_NORMAL, None)
 
 
-def test_list_open_maps_all_returned_tasks():
-    def handler(request):
-        page = int(request.url.params.get("page", "1"))
-        if page > 1:
-            return httpx.Response(200, json=[])
-        return httpx.Response(
-            200,
-            json=[
-                {"id": 1, "title": "a", "priority": 0, "position": 2},
-                {"id": 2, "title": "b", "priority": 4, "position": 1},
-            ],
-        )
+_GANTT_VIEW_ID = 10
+_LIST_VIEW_ID = 11
 
+
+def _views_handler_hit_counts():
+    """Returns (handler, hits) where hits tracks calls per endpoint kind."""
+    hits = {"views": 0, "list_view_tasks": 0, "plain_tasks": 0}
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/views"):
+            hits["views"] += 1
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": _GANTT_VIEW_ID, "view_kind": "gantt"},
+                    {"id": _LIST_VIEW_ID, "view_kind": "list"},
+                ],
+            )
+        if f"/views/{_LIST_VIEW_ID}/tasks" in path:
+            hits["list_view_tasks"] += 1
+            page = int(request.url.params.get("page", "1"))
+            if page > 1:
+                return httpx.Response(200, json=[])
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 1, "title": "a", "priority": 0, "position": 2},
+                    {"id": 2, "title": "b", "priority": 4, "position": 1},
+                ],
+            )
+        if path.endswith("/tasks"):
+            hits["plain_tasks"] += 1
+            return httpx.Response(200, json=[])
+        raise AssertionError(f"unexpected path {path}")
+
+    return handler, hits
+
+
+def test_list_open_maps_all_returned_tasks():
+    handler, hits = _views_handler_hit_counts()
     c = _client(handler)
     tasks = c.list_open()
     assert [t.id for t in tasks] == [1, 2]
     assert tasks[1].priority == PRIORITY_IMPORTANT
+    assert hits["list_view_tasks"] > 0
+    assert hits["plain_tasks"] == 0
+    assert hits["views"] == 1
+
+
+def test_list_open_discovers_view_once_and_caches_it():
+    handler, hits = _views_handler_hit_counts()
+    c = _client(handler)
+    c.list_open()
+    c.list_open()
+    assert hits["views"] == 1
+    assert hits["list_view_tasks"] >= 2
 
 
 def test_get_task_returns_none_on_404():
@@ -185,6 +225,9 @@ def test_list_open_paginates_past_a_server_enforced_page_cap():
     total_items = 5  # spans 3 server-capped pages (2, 2, 1) before the empty page
 
     def handler(request):
+        path = request.url.path
+        if path.endswith("/views"):
+            return httpx.Response(200, json=[{"id": _LIST_VIEW_ID, "view_kind": "list"}])
         page = int(request.url.params.get("page", "1"))
         start = (page - 1) * server_page_cap + 1
         end = min(start + server_page_cap, total_items + 1)
@@ -195,6 +238,28 @@ def test_list_open_paginates_past_a_server_enforced_page_cap():
     c = _client(handler)
     tasks = c.list_open()
     assert [t.id for t in tasks] == list(range(1, total_items + 1))
+
+
+def test_list_open_falls_back_to_first_view_when_no_list_kind():
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/views"):
+            return httpx.Response(200, json=[{"id": _GANTT_VIEW_ID, "view_kind": "gantt"}])
+        assert f"/views/{_GANTT_VIEW_ID}/tasks" in path
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json=[{"id": 1, "title": "a", "priority": 0, "position": 1}])
+
+    c = _client(handler)
+    tasks = c.list_open()
+    assert [t.id for t in tasks] == [1]
+
+
+def test_list_open_raises_when_views_empty():
+    c = _client(lambda r: httpx.Response(200, json=[]))
+    with pytest.raises(vikunja.VikunjaError):
+        c.list_open()
 
 
 def test_list_open_raises_on_404():
