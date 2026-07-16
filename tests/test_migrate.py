@@ -131,6 +131,50 @@ def test_recent_done_imported_old_done_skipped(tmp_path):
     assert len(vk.completed) == 1
 
 
+def test_naive_completed_at_is_treated_as_utc(tmp_path):
+    # Older / hand-edited rows can have a completed_at with no timezone offset. That
+    # must not crash the comparison against the (aware) cutoff, and it should be
+    # treated as UTC for the recent/ancient cutoff decision, same as an equivalent
+    # explicitly-UTC timestamp would be.
+    now = datetime(2026, 7, 16, tzinfo=timezone.utc)
+    recent_naive = (now - timedelta(days=10)).replace(tzinfo=None).isoformat()
+    old_naive = (now - timedelta(days=200)).replace(tzinfo=None).isoformat()
+    p = str(tmp_path / "old.db")
+    _old_db(
+        p,
+        [
+            (
+                1,
+                "recent done naive",
+                "normal",
+                None,
+                "2026-01-01T00:00:00",
+                "done",
+                None,
+                recent_naive,
+                None,
+            ),
+            (
+                2,
+                "ancient done naive",
+                "normal",
+                None,
+                "2025-01-01T00:00:00",
+                "done",
+                None,
+                old_naive,
+                None,
+            ),
+        ],
+    )
+    c = sidecar.connect(":memory:")
+    sidecar.init_db(c)
+    vk = FakeVikunja()
+    counts = m.migrate(p, vk, c, now)  # must not raise TypeError on naive vs aware
+    assert counts["done"] == 1
+    assert [t.text for t in vk.created] == ["recent done naive"]
+
+
 def test_dropped_skipped(tmp_path):
     now = datetime(2026, 7, 16, tzinfo=timezone.utc)
     p = str(tmp_path / "old.db")

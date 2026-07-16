@@ -9,6 +9,7 @@ from jolt.llm import Intent
 from jolt.memory import ConversationMemory
 from jolt.models import STATUS_PENDING, Task
 from jolt.store import Store
+from jolt.vikunja import VikunjaError
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -219,6 +220,57 @@ def test_handle_message_snapshots_the_shown_list_for_next_message(monkeypatch):
     context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert store.load_display(42) == [t1.id, t2.id]
+
+
+class RaisingStore:
+    """A store whose list_pending() always fails, standing in for a Vikunja outage."""
+
+    def list_pending(self):
+        raise VikunjaError("vikunja unreachable")
+
+
+def test_handle_message_replies_friendly_message_when_vikunja_unreachable(monkeypatch):
+    # During an outage every command must fail soft: log it, tell the user, and
+    # return, instead of propagating to the generic "something glitched" handler
+    # and losing the message.
+    called = False
+
+    def spy(*a, **k):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(bot.llm, "interpret_message", spy)
+    update = make_update("remind me to call vet")
+    context = make_context(RaisingStore())
+    asyncio.run(bot.handle_message(update, context))  # must not raise
+    assert called is False
+    update.message.reply_text.assert_awaited_once()
+    reply = update.message.reply_text.call_args.args[0]
+    assert "unreachable" in reply.lower()
+
+
+def test_handle_message_snapshot_reflects_prior_mutation_in_same_batch(monkeypatch):
+    # A single message that both adds a task and asks for the list must save a
+    # snapshot that includes the just-added task, proving the list used for the
+    # snapshot is fetched after the mutation rather than reusing a stale,
+    # pre-interpretation copy.
+    store = fresh()
+    memory = ConversationMemory()
+    monkeypatch.setattr(
+        bot.llm,
+        "interpret_message",
+        lambda msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None: [
+            Intent(action="add", text="call vet"),
+            Intent(action="list"),
+        ],
+    )
+    update = make_update("add call vet and show me the list")
+    context = make_context(store, memory=memory)
+    asyncio.run(bot.handle_message(update, context))
+    saved = store.load_display(42)
+    pending = store.list_pending()
+    assert saved == [t.id for t in pending]
+    assert len(saved) == 1
 
 
 def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):

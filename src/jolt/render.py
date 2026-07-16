@@ -59,11 +59,11 @@ def display_order(tasks: list[Task], now: datetime) -> list[Task]:
 
 def render_backlog(tasks: list[Task], now: datetime) -> str:
     today = now.date()
-    ordered = display_order(tasks, now)
+    grouped = _grouped(tasks, today)
+    ordered = [task for key, _ in _GROUPS for task in grouped[key]]
     if not ordered:
         return "Backlog empty. Nice."
     position = {task.id: i for i, task in enumerate(ordered, 1)}
-    grouped = _grouped(tasks, today)
     count = len(ordered)
     lines = [f"📋 {count} task{'s' if count != 1 else ''}"]
     for key, header in _GROUPS:

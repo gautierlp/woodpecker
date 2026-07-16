@@ -15,7 +15,14 @@ class MigrationAborted(RuntimeError):
 
 
 def _parse_dt(value):
-    return datetime.fromisoformat(value) if value else None
+    if not value:
+        return None
+    dt = datetime.fromisoformat(value)
+    # Older / hand-edited rows can have a naive timestamp. Treat it as UTC so it can
+    # always be compared against the (aware) cutoff without raising.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _parse_date(value):
