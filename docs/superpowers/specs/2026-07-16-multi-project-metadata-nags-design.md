@@ -103,9 +103,11 @@ Settled during brainstorming:
   `estimate_seconds: int | None`, `details: str` (clean description),
   `project_id`, `project_name`. The three bands are derived from the raw
   priority by a helper in `selection.py`, not stored, so the mapping lives in one
-  place. (This replaces the current binary `priority` string field; the
-  `PRIORITY_IMPORTANT` / `PRIORITY_NORMAL` constants and their string comparisons
-  are removed.)
+  place. (This replaces the current binary `priority` string on the read model.
+  The `PRIORITY_IMPORTANT` / `PRIORITY_NORMAL` constants stay, but only as the
+  task-*creation* vocabulary: `Intent.priority`, `task_create_payload`, the LLM
+  add-tool enum, and the add default in the orchestrator. Every read-model
+  `task.priority == PRIORITY_*` comparison is replaced by a band check.)
 - `vikunja.py`: `vikunja_to_task` parses priority band, estimate sentinel, and
   clean description; a new read path enumerates projects and merges their
   list-view tasks; the write path keeps a single default project.
