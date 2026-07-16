@@ -1,5 +1,9 @@
+import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
+
+import httpx
+import pytest
 
 from jolt import vikunja
 from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING
@@ -59,3 +63,81 @@ def test_create_payload_important_with_deadline():
 def test_create_payload_no_deadline_omits_field():
     p = vikunja.task_create_payload("tidy desk", PRIORITY_NORMAL, None)
     assert p == {"title": "tidy desk", "priority": 0}
+
+
+def _client(handler):
+    transport = httpx.MockTransport(handler)
+    c = vikunja.VikunjaClient("http://vk", "tok", project_id=3)
+    c._http = httpx.Client(transport=transport, base_url="http://vk")
+    return c
+
+
+def test_create_task_posts_payload_and_returns_task():
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 5, "title": "Pay taxes", "priority": 4})
+
+    c = _client(handler)
+    task = c.create_task("Pay taxes", PRIORITY_IMPORTANT, None)
+    assert seen["method"] == "PUT"
+    assert "/api/v1/projects/3/tasks" in seen["url"]
+    assert seen["auth"] == "Bearer tok"
+    assert seen["body"]["priority"] == 4
+    assert task.id == 5
+
+
+def test_list_open_maps_all_returned_tasks():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json=[
+                {"id": 1, "title": "a", "priority": 0, "position": 2},
+                {"id": 2, "title": "b", "priority": 4, "position": 1},
+            ],
+        )
+
+    c = _client(handler)
+    tasks = c.list_open()
+    assert [t.id for t in tasks] == [1, 2]
+    assert tasks[1].priority == PRIORITY_IMPORTANT
+
+
+def test_get_task_returns_none_on_404():
+    c = _client(lambda r: httpx.Response(404, json={"message": "not found"}))
+    assert c.get_task(99) is None
+
+
+def test_mark_done_posts_done_true():
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"id": 5, "title": "x", "done": True, "done_at": "2026-07-16T09:00:00Z"},
+        )
+
+    c = _client(handler)
+    task = c.mark_done(5)
+    assert seen["method"] == "POST"
+    assert "/api/v1/tasks/5" in seen["url"]
+    assert seen["body"]["done"] is True
+    assert task.completed_at is not None
+
+
+def test_delete_task_true_on_success_false_on_404():
+    assert _client(lambda r: httpx.Response(200, json={})).delete_task(5) is True
+    assert _client(lambda r: httpx.Response(404, json={})).delete_task(5) is False
+
+
+def test_server_error_raises():
+    c = _client(lambda r: httpx.Response(500, json={"message": "boom"}))
+    with pytest.raises(vikunja.VikunjaError):
+        c.list_open()

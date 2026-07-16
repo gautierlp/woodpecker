@@ -1,6 +1,8 @@
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from .models import (
     PRIORITY_IMPORTANT,
     PRIORITY_NORMAL,
@@ -61,3 +63,62 @@ def task_create_payload(text: str, priority: str, deadline: date | None) -> dict
     if due is not None:
         payload["due_date"] = due
     return payload
+
+
+class VikunjaError(RuntimeError):
+    """A Vikunja API call failed for a reason other than a 404 (which callers treat as absent)."""
+
+
+class VikunjaClient:
+    def __init__(self, base_url: str, token: str, project_id: int, timeout: float = 10.0):
+        self._project_id = project_id
+        self._token = token
+        self._http = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout,
+        )
+
+    def _request(self, method: str, path: str, *, json=None, params=None) -> httpx.Response | None:
+        # Auth is attached per-request (rather than baked into the httpx.Client at
+        # construction) so it still applies even if the client instance is swapped out,
+        # e.g. tests replace `_http` with a MockTransport-backed client.
+        headers = {"Authorization": f"Bearer {self._token}"}
+        resp = self._http.request(method, path, json=json, params=params, headers=headers)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code >= 400:
+            raise VikunjaError(f"{method} {path} -> {resp.status_code}: {resp.text[:200]}")
+        return resp
+
+    def create_task(self, text: str, priority: str, deadline: date | None) -> Task:
+        payload = task_create_payload(text, priority, deadline)
+        resp = self._request("PUT", f"/api/v1/projects/{self._project_id}/tasks", json=payload)
+        return vikunja_to_task(resp.json())
+
+    def list_open(self) -> list[Task]:
+        # Vikunja returns only undone tasks by default on a project list; the explicit
+        # filter guards against that default changing. Verify the filter syntax against the
+        # deployed version's /api/v1/docs (it has changed across releases).
+        resp = self._request(
+            "GET",
+            f"/api/v1/projects/{self._project_id}/tasks",
+            params={
+                "filter": "done = false",
+                "sort_by": "position",
+                "order_by": "asc",
+                "per_page": 250,
+            },
+        )
+        raw = resp.json() or []
+        return [vikunja_to_task(item) for item in raw]
+
+    def get_task(self, task_id: int) -> Task | None:
+        resp = self._request("GET", f"/api/v1/tasks/{task_id}")
+        return vikunja_to_task(resp.json()) if resp is not None else None
+
+    def mark_done(self, task_id: int) -> Task | None:
+        resp = self._request("POST", f"/api/v1/tasks/{task_id}", json={"done": True})
+        return vikunja_to_task(resp.json()) if resp is not None else None
+
+    def delete_task(self, task_id: int) -> bool:
+        return self._request("DELETE", f"/api/v1/tasks/{task_id}") is not None
