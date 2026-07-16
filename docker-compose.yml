@@ -20,3 +20,12 @@ services:
       # the task backlog itself lives in Vikunja, not on this bind mount.
       - ./data:/app/data
       - ./logs:/app/logs
+    # Join the shared NPM network so jolt can reach Vikunja by container name
+    # (VIKUNJA_URL=http://vikunja:3456), keeping task traffic internal to the host.
+    networks:
+      - default
+      - npm
+networks:
+  npm:
+    external: true
+    name: nginx-proxy-manager_default
