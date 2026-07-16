@@ -111,6 +111,8 @@ class VikunjaClient:
                 "per_page": 250,
             },
         )
+        if resp is None:
+            raise VikunjaError(f"list_open got 404 for project {self._project_id}")
         raw = resp.json() or []
         return [vikunja_to_task(item) for item in raw]
 

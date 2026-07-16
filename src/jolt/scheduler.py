@@ -10,7 +10,11 @@ logger = logging.getLogger(__name__)
 
 def send_daily_focus(store, send, client, now: datetime, chat_id: int) -> None:
     logger.info("Daily focus job firing at %s", now.isoformat())
-    tasks = store.list_pending()
+    try:
+        tasks = store.list_pending()
+    except Exception:
+        logger.exception("Daily focus job aborted: could not load pending tasks")
+        return
     focus = select_daily_focus(tasks, now)
     logger.info("Selected focus task_id=%s", focus.focus.id if focus.focus else None)
     backlog = render_backlog(tasks, now)
@@ -30,10 +34,15 @@ def send_nags(store, send, client, now: datetime) -> None:
     if is_quiet_hours(now):
         logger.info("Skipping nag: quiet hours")
         return
-    tasks = store.list_pending()
-    focus = select_daily_focus(tasks, now)
-    focus_id = focus.focus.id if focus.focus else None
-    tadpole = select_slow_resurface(tasks, now, exclude_id=focus_id)
+    try:
+        tasks = store.list_pending()
+        focus = select_daily_focus(tasks, now)
+        focus_id = focus.focus.id if focus.focus else None
+        tadpole = select_slow_resurface(tasks, now, exclude_id=focus_id)
+    except Exception:
+        logger.exception("Nag job aborted: could not load pending tasks")
+        send("I tried to nudge you but something on my end broke. I'll try again next time.")
+        return
     failed = False
 
     def _nag(task):

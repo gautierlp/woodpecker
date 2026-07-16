@@ -98,3 +98,19 @@ Nothing here runs automatically. Follow the steps in order, on `jarvis`, over SS
 If anything looks wrong, stop Jolt again, leave `~/docker/jolt/data/jolt.db`
 in place, and investigate before retrying. The old file is the recovery path back
 to the pre-cutover state; it is not consumed or modified by the migration.
+
+## Known limitation
+
+Migrated tasks get a fresh Vikunja `created` timestamp at import time, not the
+original creation date from the old sidecar. Staleness is measured from `created`,
+so the avoidance/tadpole surfacing (slow re-surface nags) is muted for about the
+first `STALE_THRESHOLD_DAYS` (3 days) after cutover, even for tasks that were
+already old. This is expected, not a bug: it is accepted in the spec.
+
+## If the migration fails partway
+
+A partial failure leaves Vikunja's Backlog project partially populated. Because the
+script refuses to run against a non-empty Backlog (see "Before you start" above), a
+rerun will abort rather than create duplicates. Before retrying, delete the
+partially-imported tasks from the Backlog project so it is empty again, then re-run
+the migration from step 3.

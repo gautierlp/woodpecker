@@ -147,3 +147,11 @@ def test_server_error_raises():
     c = _client(lambda r: httpx.Response(500, json={"message": "boom"}))
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
+
+
+def test_list_open_raises_on_404():
+    # A 404 here means a misconfigured VIKUNJA_PROJECT_ID, not an empty backlog:
+    # it must raise rather than silently return an empty list.
+    c = _client(lambda r: httpx.Response(404, json={"message": "project not found"}))
+    with pytest.raises(vikunja.VikunjaError):
+        c.list_open()

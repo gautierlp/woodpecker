@@ -223,6 +223,32 @@ def test_daily_focus_sends_a_fallback_when_the_llm_fails():
     assert sent[0]  # non-empty fallback text
 
 
+class RaisingStore:
+    """A store whose list_pending() always raises, to simulate a Vikunja outage."""
+
+    def list_pending(self):
+        raise RuntimeError("vikunja is down")
+
+
+def test_daily_focus_does_not_propagate_when_vikunja_is_down():
+    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
+    sent, send = collector()
+    # Must not raise: an infra hiccup at 06:00 should be logged, not crash the job.
+    scheduler.send_daily_focus(RaisingStore(), send, FakeClient(), now, chat_id=42)
+    assert sent == []  # no spam for an infra hiccup; logging + healthchecks covers it
+
+
+def test_nags_sends_fallback_and_does_not_propagate_when_vikunja_is_down():
+    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+    sent, send = collector()
+    # Must not raise: the outage is caught before any selection logic runs.
+    scheduler.send_nags(RaisingStore(), send, FakeClient(), now)
+    assert len(sent) == 1
+    assert (
+        sent[0] == "I tried to nudge you but something on my end broke. I'll try again next time."
+    )
+
+
 def test_nags_attempt_the_tadpole_even_if_the_frog_nag_fails():
     # An important stale frog and a normal stale tadpole. The frog nag raises; the tadpole
     # nag must still be attempted, and the user gets exactly one failure note.

@@ -1,11 +1,8 @@
-import logging
 from dataclasses import replace
 from datetime import date, datetime
 
 from . import sidecar
 from .models import Task
-
-logger = logging.getLogger(__name__)
 
 
 class Store:
