@@ -11,9 +11,9 @@ class ConversationMemory:
         # preceding user turn, and the Claude API needs the message list to start with
         # one; it rides in the system prompt instead so a reply like "done" resolves.
         self._outbound: dict[int, str] = {}
-        # The last-list-shown snapshot used to resolve typed numbers lives in the DB
-        # (db.save_display / db.load_display), not here: it must survive a restart, or a
-        # redeploy would silently drop number-resolution back to the live order.
+        # The last-list-shown snapshot used to resolve typed numbers lives in the store
+        # (Store.save_display / Store.load_display), not here: it must survive a restart,
+        # or a redeploy would silently drop number-resolution back to the live order.
 
     def get(self, chat_id: int) -> list[dict[str, str]]:
         return list(self._history.get(chat_id, []))

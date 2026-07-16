@@ -1,20 +1,70 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
-from jolt import bot, db
+from jolt import bot, sidecar
 from jolt.llm import Intent
 from jolt.memory import ConversationMemory
+from jolt.models import STATUS_PENDING, Task
+from jolt.store import Store
 
 TZ = ZoneInfo("Europe/Paris")
 
 
-def fresh():
-    conn = db.connect(":memory:")
-    db.init_db(conn)
-    return conn
+class FakeVikunja:
+    def __init__(self, open_tasks=None):
+        self._open = {t.id: t for t in (open_tasks or [])}
+        self._next_id = max(self._open, default=0) + 1
+
+    def list_open(self):
+        return list(self._open.values())
+
+    def create_task(self, text, priority, deadline):
+        task = Task(
+            id=self._next_id,
+            text=text,
+            priority=priority,
+            deadline=deadline,
+            created_at=datetime.now(timezone.utc),
+            status=STATUS_PENDING,
+            last_nagged_at=None,
+            completed_at=None,
+            position=0,
+        )
+        self._open[task.id] = task
+        self._next_id += 1
+        return task
+
+    def get_task(self, task_id):
+        return self._open.get(task_id)
+
+    def mark_done(self, task_id):
+        return self._open.pop(task_id, None)
+
+    def delete_task(self, task_id):
+        return self._open.pop(task_id, None) is not None
+
+
+def _task(id, created_at=None):
+    return Task(
+        id=id,
+        text=f"task {id}",
+        priority="normal",
+        deadline=None,
+        created_at=created_at or datetime(2026, 7, 1, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+        position=0,
+    )
+
+
+def fresh(open_tasks=None):
+    conn = sidecar.connect(":memory:")
+    sidecar.init_db(conn)
+    return Store(FakeVikunja(open_tasks), conn)
 
 
 def make_update(text, chat_id=42):
@@ -22,11 +72,11 @@ def make_update(text, chat_id=42):
     return SimpleNamespace(message=message, effective_chat=SimpleNamespace(id=chat_id))
 
 
-def make_context(conn, intent, chat_id=42, memory=None):
+def make_context(store, chat_id=42, memory=None):
     # client is unused because interpret_message is monkeypatched in the test
     return SimpleNamespace(
         bot_data={
-            "conn": conn,
+            "store": store,
             "client": object(),
             "chat_id": chat_id,
             "memory": memory or ConversationMemory(),
@@ -35,7 +85,7 @@ def make_context(conn, intent, chat_id=42, memory=None):
 
 
 def test_handle_message_adds_task_and_replies(monkeypatch):
-    conn = fresh()
+    store = fresh()
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
@@ -44,15 +94,15 @@ def test_handle_message_adds_task_and_replies(monkeypatch):
         ],
     )
     update = make_update("remind me to call vet")
-    context = make_context(conn, None)
+    context = make_context(store)
     asyncio.run(bot.handle_message(update, context))
     update.message.reply_text.assert_awaited_once()
     assert "call vet" in update.message.reply_text.call_args.args[0]
-    assert len(db.list_pending(conn)) == 1
+    assert len(store.list_pending()) == 1
 
 
 def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
-    conn = fresh()
+    store = fresh()
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
@@ -63,9 +113,9 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
         ],
     )
     update = make_update("(three tasks at once)")
-    context = make_context(conn, None)
+    context = make_context(store)
     asyncio.run(bot.handle_message(update, context))
-    assert len(db.list_pending(conn)) == 3
+    assert len(store.list_pending()) == 3
     reply = update.message.reply_text.call_args.args[0]
     assert "cancel gym" in reply
     assert "file taxes" in reply
@@ -75,9 +125,9 @@ def test_handle_message_saves_every_task_and_confirms_each(monkeypatch):
 def test_handle_message_passes_prior_history_to_llm(monkeypatch):
     # The follow-up fix: the previous turn must reach interpret_message so a bare
     # "Yes" can be resolved.
-    conn = fresh()
+    store = fresh()
     memory = ConversationMemory()
-    memory.add(42, "is 32 blocked by 31?", "Not currently. Want me to set that up?")
+    memory.add(42, "is the taxes task done?", "Not currently. Want me to mark it?")
     seen = {}
 
     def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):
@@ -86,17 +136,17 @@ def test_handle_message_passes_prior_history_to_llm(monkeypatch):
 
     monkeypatch.setattr(bot.llm, "interpret_message", capture)
     update = make_update("Yes")
-    context = make_context(conn, None, memory=memory)
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert seen["history"] == [
-        {"role": "user", "content": "is 32 blocked by 31?"},
-        {"role": "assistant", "content": "Not currently. Want me to set that up?"},
+        {"role": "user", "content": "is the taxes task done?"},
+        {"role": "assistant", "content": "Not currently. Want me to mark it?"},
     ]
 
 
 def test_handle_message_records_turn_in_memory(monkeypatch):
     # After replying, the exchange must be stored so the *next* message has context.
-    conn = fresh()
+    store = fresh()
     memory = ConversationMemory()
     monkeypatch.setattr(
         bot.llm,
@@ -105,18 +155,18 @@ def test_handle_message_records_turn_in_memory(monkeypatch):
             Intent(action="answer", reply="Want me to set that up?")
         ],
     )
-    update = make_update("is 32 blocked by 31?")
-    context = make_context(conn, None, memory=memory)
+    update = make_update("is the taxes task done?")
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert memory.get(42) == [
-        {"role": "user", "content": "is 32 blocked by 31?"},
+        {"role": "user", "content": "is the taxes task done?"},
         {"role": "assistant", "content": "Want me to set that up?"},
     ]
 
 
 def test_handle_message_passes_pending_outbound_to_llm(monkeypatch):
     # A reply to a nag must carry the nag into interpret_message as context.
-    conn = fresh()
+    store = fresh()
     memory = ConversationMemory()
     memory.note_outbound(42, "Still the taxes. Two minutes. Go.")
     seen = {}
@@ -127,7 +177,7 @@ def test_handle_message_passes_pending_outbound_to_llm(monkeypatch):
 
     monkeypatch.setattr(bot.llm, "interpret_message", capture)
     update = make_update("done")
-    context = make_context(conn, None, memory=memory)
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert seen["outbound"] == "Still the taxes. Two minutes. Go."
 
@@ -135,7 +185,7 @@ def test_handle_message_passes_pending_outbound_to_llm(monkeypatch):
 def test_handle_message_clears_outbound_after_reply(monkeypatch):
     # Once the user has engaged, the pending nag is spent and must not haunt the
     # next unrelated message.
-    conn = fresh()
+    store = fresh()
     memory = ConversationMemory()
     memory.note_outbound(42, "Still the taxes. Two minutes. Go.")
     monkeypatch.setattr(
@@ -146,7 +196,7 @@ def test_handle_message_clears_outbound_after_reply(monkeypatch):
         ],
     )
     update = make_update("done")
-    context = make_context(conn, None, memory=memory)
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert memory.get_outbound(42) is None
 
@@ -154,10 +204,10 @@ def test_handle_message_clears_outbound_after_reply(monkeypatch):
 def test_handle_message_snapshots_the_shown_list_for_next_message(monkeypatch):
     # After showing the list, the exact order shown is remembered, so the next message's
     # numbers resolve against what the user is looking at, not a re-derived live order.
-    conn = fresh()
+    t1 = _task(1, datetime(2026, 7, 1, tzinfo=TZ))
+    t2 = _task(2, datetime(2026, 7, 2, tzinfo=TZ))
+    store = fresh([t1, t2])
     memory = ConversationMemory()
-    t1 = db.add_task(conn, "first", "normal", None, datetime(2026, 7, 1, tzinfo=TZ))
-    t2 = db.add_task(conn, "second", "normal", None, datetime(2026, 7, 2, tzinfo=TZ))
     monkeypatch.setattr(
         bot.llm,
         "interpret_message",
@@ -166,17 +216,17 @@ def test_handle_message_snapshots_the_shown_list_for_next_message(monkeypatch):
         ],
     )
     update = make_update("current tasks")
-    context = make_context(conn, None, memory=memory)
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
-    assert db.load_display(conn, 42) == [t1.id, t2.id]
+    assert store.load_display(42) == [t1.id, t2.id]
 
 
 def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):
     # The snapshot from the last list must reach interpret_message, so a number resolves
     # against the list the user saw rather than the current order.
-    conn = fresh()
+    store = fresh()
     memory = ConversationMemory()
-    db.save_display(conn, 42, [7, 3, 9])
+    store.save_display(42, [7, 3, 9])
     seen = {}
 
     def capture(msg, tasks, now, client, history=None, recent_outbound=None, display_ids=None):
@@ -185,7 +235,7 @@ def test_handle_message_passes_display_snapshot_to_llm(monkeypatch):
 
     monkeypatch.setattr(bot.llm, "interpret_message", capture)
     update = make_update("done 2")
-    context = make_context(conn, None, memory=memory)
+    context = make_context(store, memory=memory)
     asyncio.run(bot.handle_message(update, context))
     assert seen["display_ids"] == [7, 3, 9]
 
@@ -202,7 +252,7 @@ def test_recording_send_notes_outbound_then_forwards():
 
 
 def test_handle_message_ignores_foreign_chat(monkeypatch):
-    conn = fresh()
+    store = fresh()
     called = False
 
     def spy(*a, **k):
@@ -211,7 +261,7 @@ def test_handle_message_ignores_foreign_chat(monkeypatch):
 
     monkeypatch.setattr(bot.llm, "interpret_message", spy)
     update = make_update("hello", chat_id=999)
-    context = make_context(conn, None, chat_id=42)
+    context = make_context(store, chat_id=42)
     asyncio.run(bot.handle_message(update, context))
     assert called is False
     update.message.reply_text.assert_not_awaited()
@@ -219,7 +269,7 @@ def test_handle_message_ignores_foreign_chat(monkeypatch):
 
 def test_handle_start_replies_with_welcome():
     update = make_update("/start")
-    context = make_context(fresh(), None)
+    context = make_context(fresh())
     asyncio.run(bot.handle_start(update, context))
     update.message.reply_text.assert_awaited_once()
     assert "Jolt" in update.message.reply_text.call_args.args[0]
@@ -227,7 +277,7 @@ def test_handle_start_replies_with_welcome():
 
 def test_handle_start_ignores_foreign_chat():
     update = make_update("/start", chat_id=999)
-    context = make_context(fresh(), None, chat_id=42)
+    context = make_context(fresh(), chat_id=42)
     asyncio.run(bot.handle_start(update, context))
     update.message.reply_text.assert_not_awaited()
 

@@ -35,7 +35,19 @@ def anthropic_api_key() -> str:
     return os.environ["ANTHROPIC_API_KEY"]
 
 
-def db_path() -> str:
+def vikunja_url() -> str:
+    return os.environ["VIKUNJA_URL"]
+
+
+def vikunja_token() -> str:
+    return os.environ["VIKUNJA_TOKEN"]
+
+
+def vikunja_project_id() -> int:
+    return int(os.environ["VIKUNJA_PROJECT_ID"])
+
+
+def sidecar_path() -> str:
     return os.environ.get("JOLT_DB_PATH", "data/jolt.db")
 
 

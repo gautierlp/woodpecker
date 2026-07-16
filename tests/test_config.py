@@ -34,11 +34,26 @@ def test_task_and_focus_construct():
     assert focus.rescues == []
 
 
-def test_db_path_defaults_when_unset(monkeypatch):
+def test_sidecar_path_defaults_when_unset(monkeypatch):
     from jolt import config
 
     monkeypatch.delenv("JOLT_DB_PATH", raising=False)
-    assert config.db_path() == "data/jolt.db"
+    assert config.sidecar_path() == "data/jolt.db"
+
+
+def test_vikunja_url_reads_env(monkeypatch):
+    monkeypatch.setenv("VIKUNJA_URL", "https://vikunja.example.com")
+    assert config.vikunja_url() == "https://vikunja.example.com"
+
+
+def test_vikunja_token_reads_env(monkeypatch):
+    monkeypatch.setenv("VIKUNJA_TOKEN", "tk_123")
+    assert config.vikunja_token() == "tk_123"
+
+
+def test_vikunja_project_id_reads_env_as_int(monkeypatch):
+    monkeypatch.setenv("VIKUNJA_PROJECT_ID", "7")
+    assert config.vikunja_project_id() == 7
 
 
 def test_log_level_defaults_to_info_and_uppercases(monkeypatch):

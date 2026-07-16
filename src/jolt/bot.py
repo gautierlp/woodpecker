@@ -1,6 +1,6 @@
 import logging
 
-from . import config, db, llm, orchestrator, render
+from . import config, llm, orchestrator, render
 
 logger = logging.getLogger(__name__)
 
@@ -36,28 +36,27 @@ async def handle_message(update, context) -> None:
     if update.effective_chat.id != chat_id:
         logger.warning("Ignoring message from unauthorized chat %s", update.effective_chat.id)
         return
-    conn = context.bot_data["conn"]
+    store = context.bot_data["store"]
     client = context.bot_data["client"]
     memory = context.bot_data["memory"]
     now = config.now_paris()
     text = update.message.text or ""
     logger.info("Received message (%d chars)", len(text))
     logger.debug("Inbound message body: %s", text)
-    tasks = db.list_all(conn)
+    tasks = store.list_pending()
     history = memory.get(chat_id)
     outbound = memory.get_outbound(chat_id)
-    display_ids = db.load_display(conn, chat_id)
+    display_ids = store.load_display(chat_id)
     intents = llm.interpret_message(
         text, tasks, now, client, history=history, recent_outbound=outbound, display_ids=display_ids
     )
     logger.info("Interpreted into %d intent(s): %s", len(intents), [i.action for i in intents])
-    reply = "\n".join(orchestrator.apply_intent(conn, intent, now) for intent in intents)
+    reply = "\n".join(orchestrator.apply_intent(store, intent, now) for intent in intents)
     logger.debug("Reply body: %s", reply)
     # If we just printed the backlog, remember the exact order shown, so the numbers in
     # the next message resolve against this list rather than a later, shifted order.
     if any(intent.action == "list" for intent in intents):
-        shown = render.display_order(db.list_all(conn), now)
-        db.save_display(conn, chat_id, [t.id for t in shown])
+        store.save_display(chat_id, [t.id for t in render.display_order(store.list_pending(), now)])
     memory.add(chat_id, text, reply)
     # The pending nag has now been answered (or superseded by real conversation), so
     # it must not colour the next, unrelated message.

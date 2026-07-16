@@ -6,8 +6,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from . import bot, config, db, llm, scheduler
+from . import bot, config, llm, scheduler, sidecar
 from .memory import ConversationMemory
+from .store import Store
+from .vikunja import VikunjaClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,21 +66,21 @@ def _make_send(application, chat_id):
     return send
 
 
-def build_scheduler(conn, send, client, chat_id) -> AsyncIOScheduler:
+def build_scheduler(store, send, client, chat_id) -> AsyncIOScheduler:
     """Build the cron scheduler for the daily focus and nags.
 
     The jobs are coroutines on purpose: AsyncIOScheduler runs coroutine jobs on the
-    bot's own asyncio event loop, the same thread that owns `conn` and the Telegram
-    send. A BackgroundScheduler with plain sync jobs ran them on a worker thread
-    instead, where the SQLite connection is unusable and there is no running loop for
-    the send, so every scheduled message crashed silently."""
+    bot's own asyncio event loop, the same thread that owns the sidecar connection and
+    the Telegram send. A BackgroundScheduler with plain sync jobs ran them on a worker
+    thread instead, where the SQLite connection is unusable and there is no running loop
+    for the send, so every scheduled message crashed silently."""
     sched = AsyncIOScheduler(timezone=config.TIMEZONE)
 
     async def _daily_focus():
-        scheduler.send_daily_focus(conn, send, client, config.now_paris(), chat_id)
+        scheduler.send_daily_focus(store, send, client, config.now_paris(), chat_id)
 
     async def _nags():
-        scheduler.send_nags(conn, send, client, config.now_paris())
+        scheduler.send_nags(store, send, client, config.now_paris())
 
     # Pass the timezone to every CronTrigger explicitly. APScheduler does NOT stamp the
     # scheduler's timezone onto a trigger; a trigger built without one defaults to the
@@ -94,10 +96,12 @@ def build_scheduler(conn, send, client, chat_id) -> AsyncIOScheduler:
 def main() -> None:
     setup_logging()
     logger.info("Starting Jolt")
-    os.makedirs(os.path.dirname(config.db_path()) or ".", exist_ok=True)
-    logger.info("Opening database at %s", config.db_path())
-    conn = db.connect(config.db_path())
-    db.init_db(conn)
+    os.makedirs(os.path.dirname(config.sidecar_path()) or ".", exist_ok=True)
+    logger.info("Opening sidecar database at %s", config.sidecar_path())
+    conn = sidecar.connect(config.sidecar_path())
+    sidecar.init_db(conn)
+    vk = VikunjaClient(config.vikunja_url(), config.vikunja_token(), config.vikunja_project_id())
+    store = Store(vk, conn)
     client = llm.build_client(config.anthropic_api_key())
     chat_id = config.telegram_chat_id()
     logger.info(
@@ -109,9 +113,9 @@ def main() -> None:
     async def _post_init(application) -> None:
         # Runs once the event loop is up. Build the send and start the scheduler here so
         # AsyncIOScheduler binds to the bot's running loop: the jobs then execute on the
-        # same thread that owns `conn` and the Telegram send.
+        # same thread that owns the sidecar connection and the Telegram send.
         send = bot.make_recording_send(_make_send(application, chat_id), memory, chat_id)
-        sched = build_scheduler(conn, send, client, chat_id)
+        sched = build_scheduler(store, send, client, chat_id)
         sched.start()
         application.bot_data["scheduler"] = sched
         logger.info(
@@ -122,7 +126,7 @@ def main() -> None:
 
     application = Application.builder().token(config.telegram_token()).post_init(_post_init).build()
     application.bot_data.update(
-        {"conn": conn, "client": client, "chat_id": chat_id, "memory": memory}
+        {"store": store, "client": client, "chat_id": chat_id, "memory": memory}
     )
     application.add_handler(CommandHandler("start", bot.handle_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
