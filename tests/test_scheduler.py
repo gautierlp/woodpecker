@@ -94,29 +94,29 @@ def collector():
     return sent, lambda msg: sent.append(msg)
 
 
-def test_daily_focus_sends_prose_then_backlog():
+def test_daily_focus_sends_prose_then_matters():
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, 4, created_at=now)])
+    store = fresh([_task(1, 4, created_at=now, deadline=now.date())])
     sent, send = collector()
     scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
     assert len(sent) == 1
-    assert "canned prose" in sent[0]
-    assert "📋 " in sent[0]
+    assert sent[0].startswith("canned prose")
+    assert "Today's priorities" in sent[0]
     assert "task 1" in sent[0]
 
 
-def test_daily_focus_snapshots_the_order_it_shows():
-    # The 06:00 focus prints a numbered backlog but used to never record that order, so a
-    # number typed after it resolved against a re-derived live list (the "28 done" bug).
-    # It must snapshot the exact order shown, keyed by chat, so the next number lines up
-    # with what the user is looking at. Here 'a' is important, 'b' normal, so a ranks first.
+def test_daily_focus_snapshots_the_morning_shown_order():
+    # The 06:00 focus must snapshot the exact subset it shows (priority >= 2, has a due
+    # date), keyed by chat, so a number typed later resolves against this morning's list,
+    # not a live order later completions may have renumbered. A no-date, low-priority task
+    # is not shown and must not be in the snapshot.
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    a = _task(1, 4, created_at=now)
+    a = _task(1, 4, created_at=now, deadline=now.date())
     b = _task(2, 0, created_at=now)
     store = fresh([a, b])
     sent, send = collector()
     scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
-    assert store.load_display(42) == [a.id, b.id]
+    assert store.load_display(42) == [a.id]
 
 
 def test_nags_skipped_during_quiet_hours():
@@ -216,7 +216,7 @@ def test_slow_resurface_gated_by_cadence():
 
 def test_daily_focus_sends_a_fallback_when_the_llm_fails():
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, 4, created_at=now)])
+    store = fresh([_task(1, 4, created_at=now, deadline=now.date())])  # eligible frog
     sent, send = collector()
     scheduler.send_daily_focus(store, send, RaisingClient(), now, chat_id=42)
     assert len(sent) == 1  # the user hears about it rather than silence

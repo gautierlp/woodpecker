@@ -5,7 +5,7 @@ from datetime import date, datetime
 from anthropic import Anthropic
 
 from . import config, render
-from .models import DailyFocus, STATUS_PENDING, Task
+from .models import STATUS_PENDING, Task
 from .selection import BAND_HIGH, BAND_MID, nag_stance, priority_band
 
 logger = logging.getLogger(__name__)
@@ -343,35 +343,28 @@ def _text_of(response) -> str:
     return _EMPTY_REPLY_FALLBACK
 
 
-def write_focus(focus: DailyFocus, now: datetime, client) -> str:
-    if focus.focus is None:
-        return "Nothing on the list today. Enjoy it."
-    age = (now - focus.focus.created_at).days
-    rescues = (
-        "; ".join(
-            f"{t.text} ({(now - t.created_at).days}d old, {_importance(t)})" for t in focus.rescues
-        )
-        or "none"
-    )
+def write_focus(frog: Task | None, now: datetime, client) -> str:
+    if frog is None:
+        return "Nothing high-priority is on the hook today. Use the breathing room."
+    age = (now - frog.created_at).days
+    duration = _format_duration(frog.estimate_seconds)
     system = (
-        "You are Jolt. Write a short morning message (2 to 4 lines). Lead with the "
-        "one focus task as the single thing to hit today, and push harder on important tasks than "
-        "low-stakes ones. If there are rescue tasks that have gone stale, mention them: for an "
-        "important rescue ask what is blocking it, but for a low-stakes (normal) rescue lean the "
-        "other way and ask whether it is still worth keeping or should just be dropped. Be plain "
-        "and direct, never guilt-tripping. "
-        "Never use an em dash (the '—' character). Use a comma, a colon, or a period instead. "
-        "This rule has no exceptions."
+        "You are Jolt. Write a short morning message (2 to 4 lines) about the ONE task below, "
+        "the single thing to attack today. Push to start it: name the blocker and a concrete "
+        "small first step. If it has been pushed forward before, call that out plainly and get "
+        "more insistent the more it has slipped. Be direct, never guilt-tripping. "
+        "Never use em dashes; use a comma, a colon, or a period instead. This rule has no "
+        "exceptions."
     )
-    focus_bits = [f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)})"]
-    focus_duration = _format_duration(focus.focus.estimate_seconds)
-    if focus_duration:
-        focus_bits.append(f"est {focus_duration}")
-    if focus.focus.project_name:
-        focus_bits.append(f"in {focus.focus.project_name}")
-    focus_line = ", ".join(focus_bits)
-    details_line = f" Notes: {focus.focus.details}." if focus.focus.details else ""
-    user = f"{focus_line}. Rescues: {rescues}.{details_line}"
+    bits = [f"Focus task: {frog.text}", f"priority {_importance(frog)}", f"{age}d old"]
+    if frog.bump_count:
+        bits.append(f"due date pushed forward {frog.bump_count} time(s)")
+    if duration:
+        bits.append(f"est {duration}")
+    if frog.project_name:
+        bits.append(f"in {frog.project_name}")
+    details_line = f" Notes: {frog.details}." if frog.details else ""
+    user = ", ".join(bits) + "." + details_line
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=300,

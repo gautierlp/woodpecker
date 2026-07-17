@@ -2,8 +2,13 @@ import logging
 from datetime import datetime
 
 from . import llm
-from .render import display_order, render_backlog
-from .selection import is_quiet_hours, select_daily_focus, select_slow_resurface
+from .render import morning_shown, render_matters
+from .selection import (
+    is_quiet_hours,
+    select_daily_focus,
+    select_frog,
+    select_slow_resurface,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,18 +20,18 @@ def send_daily_focus(store, send, client, now: datetime, chat_id: int) -> None:
     except Exception:
         logger.exception("Daily focus job aborted: could not load pending tasks")
         return
-    focus = select_daily_focus(tasks, now)
-    logger.info("Selected focus task_id=%s", focus.focus.id if focus.focus else None)
-    backlog = render_backlog(tasks, now)
-    # Record the exact order shown, so a number the user types after the focus resolves
-    # against this list, not a live order that later completions may have renumbered.
-    store.save_display(chat_id, [t.id for t in display_order(tasks, now)])
+    frog = select_frog(tasks, now)
+    logger.info("Selected frog task_id=%s", frog.id if frog else None)
+    matters = render_matters(tasks, now)
+    # Record the exact order shown, so a number the user types resolves against this
+    # morning list, not a live order that later completions may have renumbered.
+    store.save_display(chat_id, [t.id for t in morning_shown(tasks, now)])
     try:
-        prose = llm.write_focus(focus, now, client)
+        prose = llm.write_focus(frog, now, client)
     except Exception:
-        logger.exception("Daily focus prose failed; sending the backlog with a plain lead")
-        prose = "Morning. I couldn't write today's lead, but here's where things stand."
-    send(f"{prose}\n\n{backlog}")
+        logger.exception("Daily focus prose failed; sending the priorities with a plain lead")
+        prose = "Morning. Here's what matters today."
+    send(f"{prose}\n\n{matters}")
 
 
 def send_nags(store, send, client, now: datetime) -> None:

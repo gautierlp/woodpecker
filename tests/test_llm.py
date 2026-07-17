@@ -1,10 +1,11 @@
 import logging
+from dataclasses import replace
 from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from jolt import llm
-from jolt.models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
+from jolt.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -456,20 +457,20 @@ def test_write_nag_passes_importance_to_prompt():
     assert "important" in str(client.messages.calls[0]).lower()
 
 
-def test_write_focus_passes_importance_to_prompt():
-    text_block = SimpleNamespace(type="text", text="ok")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    focus = DailyFocus(focus=_important_task(1), rescues=[_important_task(2)])
-    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
-    assert "important" in str(client.messages.calls[0]).lower()
+def test_write_focus_leads_on_the_frog_and_names_the_bump_count():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
+    frog = replace(_high_task(estimate_seconds=7200, project_name="Backlog"), bump_count=4)
+    llm.write_focus(frog, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    payload = str(client.messages.calls[0]).lower()
+    assert "4" in payload  # the bump count is surfaced
+    assert "backlog" in payload
 
 
-def test_write_focus_returns_text():
-    text_block = SimpleNamespace(type="text", text="One thing today: taxes.")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    focus = DailyFocus(focus=_task(), rescues=[])
-    out = llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
-    assert out == "One thing today: taxes."
+def test_write_focus_handles_no_frog():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
+    out = llm.write_focus(None, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    assert isinstance(out, str) and out
+    assert client.messages.calls == []  # no Claude call when there is nothing to lead on
 
 
 def test_write_nag_returns_text():
@@ -519,17 +520,6 @@ def test_write_nag_normal_is_drop_leaning():
     llm.write_nag(_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
     system = client.messages.calls[0]["system"].lower()
     assert "drop" in system or "still want" in system or "add it today" in system
-
-
-def test_write_focus_leans_drop_for_low_value_rescue():
-    # A normal (low-value) rescue should be framed as "still worth keeping?", not
-    # "what is blocking it?", so the morning digest matches the drop-leaning nag stance.
-    text_block = SimpleNamespace(type="text", text="ok")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    focus = DailyFocus(focus=_important_task(1), rescues=[_task(2)])  # _task is normal
-    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "drop" in system or "worth keeping" in system or "still want" in system
 
 
 def test_text_of_falls_back_when_no_text_block():
@@ -703,13 +693,10 @@ def test_write_nag_includes_description_and_project():
 
 def test_write_focus_includes_duration_details_and_project():
     client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
-    focus = DailyFocus(
-        focus=_high_task(
-            estimate_seconds=7200, details="on the tax-portal PDF", project_name="Backlog"
-        ),
-        rescues=[],
+    frog = _high_task(
+        estimate_seconds=7200, details="on the tax-portal PDF", project_name="Backlog"
     )
-    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    llm.write_focus(frog, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
     payload = str(client.messages.calls[0]).lower()
     assert "2h" in payload
     assert "tax-portal" in payload
