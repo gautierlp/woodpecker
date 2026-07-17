@@ -104,7 +104,7 @@ class VikunjaClient:
             base_url=base_url.rstrip("/"),
             timeout=timeout,
         )
-        self._cached_list_view_id: int | None = None
+        self._list_view_ids: dict[int, int] = {}
 
     def close(self) -> None:
         """Close the underlying HTTP connection pool. Jolt runs as a long-lived process so
@@ -146,25 +146,46 @@ class VikunjaClient:
             raise VikunjaError(f"create_task got 404 for project {self._project_id}")
         return vikunja_to_task(resp.json())
 
-    def _list_view_id(self) -> int:
-        # Vikunja 2.x makes "position" a per-VIEW concept (not per-project), and
-        # /projects/{id}/tasks?sort_by=position 400s with "You must provide a project
-        # view ID when sorting by position". So the list endpoint must be addressed
-        # through a specific view. We discover the project's list view once and cache
-        # it on the client instance, since it does not change during a run.
-        if self._cached_list_view_id is not None:
-            return self._cached_list_view_id
-        resp = self._request("GET", f"/api/v1/projects/{self._project_id}/views")
+    def _list_view_id(self, project_id: int) -> int:
+        # Vikunja 2.x makes "position" a per-VIEW concept, so the list endpoint must be
+        # addressed through a specific view. Discover each project's list view once and
+        # cache it per project, since it does not change during a run.
+        if project_id in self._list_view_ids:
+            return self._list_view_ids[project_id]
+        resp = self._request("GET", f"/api/v1/projects/{project_id}/views")
         if resp is None:
-            raise VikunjaError(f"list views got 404 for project {self._project_id}")
+            raise VikunjaError(f"list views got 404 for project {project_id}")
         views = resp.json() or []
         if not views:
-            raise VikunjaError(f"project {self._project_id} has no views")
+            raise VikunjaError(f"project {project_id} has no views")
         view = next((v for v in views if v.get("view_kind") == "list"), views[0])
-        self._cached_list_view_id = view["id"]
-        return self._cached_list_view_id
+        self._list_view_ids[project_id] = view["id"]
+        return self._list_view_ids[project_id]
+
+    def list_projects(self) -> list[tuple[int, str]]:
+        # Enumerate every real project live, so newly created projects are picked up with
+        # no config change. Skip Vikunja's pseudo-projects (negative ids, e.g. Favorites)
+        # and archived projects, whose tasks should not be nagged about.
+        resp = self._request("GET", "/api/v1/projects")
+        if resp is None:
+            raise VikunjaError("list projects got 404")
+        projects = resp.json() or []
+        return [
+            (p["id"], p.get("title", ""))
+            for p in projects
+            if p["id"] > 0 and not p.get("is_archived", False)
+        ]
 
     def list_open(self) -> list[Task]:
+        # Read open tasks from every project and merge them. The write path
+        # (create_task) still targets the single configured project; only reading spans
+        # all of them.
+        tasks: list[Task] = []
+        for project_id, project_name in self.list_projects():
+            tasks.extend(self._list_open_project(project_id, project_name))
+        return tasks
+
+    def _list_open_project(self, project_id: int, project_name: str) -> list[Task]:
         # Vikunja returns only undone tasks by default on a project list; the explicit
         # filter guards against that default changing. Verify the filter syntax against the
         # deployed version's /api/v1/docs (it has changed across releases).
@@ -176,12 +197,12 @@ class VikunjaClient:
         # server capped it. The only reliable end-of-list signal is an EMPTY page. We loop
         # until that happens, capping at _LIST_OPEN_MAX_PAGES to avoid ever looping forever
         # against a misbehaving server.
-        view_id = self._list_view_id()
+        view_id = self._list_view_id(project_id)
         tasks: list[Task] = []
         for page in range(1, _LIST_OPEN_MAX_PAGES + 1):
             resp = self._request(
                 "GET",
-                f"/api/v1/projects/{self._project_id}/views/{view_id}/tasks",
+                f"/api/v1/projects/{project_id}/views/{view_id}/tasks",
                 params={
                     "filter": "done = false",
                     "sort_by": "position",
@@ -191,16 +212,16 @@ class VikunjaClient:
                 },
             )
             if resp is None:
-                raise VikunjaError(f"list_open got 404 for project {self._project_id}")
+                raise VikunjaError(f"list_open got 404 for project {project_id}")
             raw = resp.json() or []
             if not raw:
                 break
-            tasks.extend(vikunja_to_task(item) for item in raw)
+            tasks.extend(vikunja_to_task(item, project_name) for item in raw)
         else:
             _log.warning(
                 "list_open hit the %d-page cap for project %d; results may be incomplete",
                 _LIST_OPEN_MAX_PAGES,
-                self._project_id,
+                project_id,
             )
         return tasks
 
