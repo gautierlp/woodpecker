@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from jolt import sidecar, store
 from jolt.models import PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
@@ -10,6 +10,11 @@ class FakeVikunja:
         self._tasks.update({t.id: t for t in (done_tasks or [])})
         self.deleted = []
         self.completed = []
+
+    def set_open(self, open_tasks):
+        """Replace the open tasks the fake returns from list_open, so a test can
+        simulate a due date moving forward between two reads."""
+        self._tasks = {t.id: t for t in open_tasks}
 
     def list_open(self):
         return [t for t in self._tasks.values() if t.status == STATUS_PENDING]
@@ -123,3 +128,13 @@ def test_list_pending_with_empty_result_does_not_prune_nag_state():
     sidecar.set_last_nagged(c, 42, when)
     assert s.list_pending() == []
     assert sidecar.last_nagged_map(c) == {42: when}
+
+
+def test_list_pending_injects_bump_count_after_a_forward_move():
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 18))])
+    s, _c = _store(vk)
+    first = s.list_pending()
+    assert first[0].bump_count == 0
+    vk.set_open([_task(1, deadline=date(2026, 7, 19))])
+    second = s.list_pending()
+    assert second[0].bump_count == 1

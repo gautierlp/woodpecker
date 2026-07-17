@@ -18,11 +18,17 @@ class Store:
         return self._vk.create_task(text, priority, deadline)
 
     def list_pending(self) -> list[Task]:
+        tasks = self._vk.list_open()
+        sidecar.apply_due_snapshot(self._conn, {t.id: t.deadline for t in tasks})
         nagged = sidecar.last_nagged_map(self._conn)
-        tasks = [replace(t, last_nagged_at=nagged.get(t.id)) for t in self._vk.list_open()]
+        counts = sidecar.bump_counts(self._conn)
+        tasks = [
+            replace(t, last_nagged_at=nagged.get(t.id), bump_count=counts.get(t.id, 0))
+            for t in tasks
+        ]
         # An empty result is ambiguous between "truly no open tasks" and a broken
         # filter/transient glitch. Only prune when we have at least one live task to
-        # prune against, so a flaky response can't wipe everyone's nag state.
+        # prune against, so a flaky response can't wipe everyone's sidecar state.
         if tasks:
             sidecar.prune(self._conn, {t.id for t in tasks})
         return tasks
@@ -32,7 +38,8 @@ class Store:
         if task is None:
             return None
         nagged = sidecar.last_nagged_map(self._conn)
-        return replace(task, last_nagged_at=nagged.get(task.id))
+        counts = sidecar.bump_counts(self._conn)
+        return replace(task, last_nagged_at=nagged.get(task.id), bump_count=counts.get(task.id, 0))
 
     def complete_task(self, task_id: int, now: datetime) -> Task | None:
         task = self._vk.get_task(task_id)

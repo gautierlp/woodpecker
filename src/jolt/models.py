@@ -26,6 +26,7 @@ class Task:
     details: str = ""  # the visible description, sentinel stripped
     project_id: int = 0
     project_name: str = ""
+    bump_count: int = 0  # forward due-date moves counted in the sidecar; the avoidance signal
 
 
 @dataclass(frozen=True)
