@@ -167,7 +167,8 @@ def _multi_project_handler():
     def handler(request):
         path = request.url.path
         if path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=projects)
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else projects)
         for pid, vid in views.items():
             if path.endswith(f"/projects/{pid}/views"):
                 return httpx.Response(200, json=[{"id": vid, "view_kind": "list"}])
@@ -207,7 +208,8 @@ def test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others():
     def handler(request):
         path = request.url.path
         if path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=projects)
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else projects)
         if path.endswith("/projects/2/views"):
             return httpx.Response(404, json={"message": "not found"})
         if path.endswith("/projects/3/views"):
@@ -310,7 +312,8 @@ def test_list_open_paginates_past_a_server_enforced_page_cap():
     def handler(request):
         path = request.url.path
         if path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else _SINGLE_PROJECT)
         if path.endswith("/views"):
             return httpx.Response(200, json=[{"id": _LIST_VIEW_ID, "view_kind": "list"}])
         page = int(request.url.params.get("page", "1"))
@@ -329,7 +332,8 @@ def test_list_open_falls_back_to_first_view_when_no_list_kind():
     def handler(request):
         path = request.url.path
         if path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else _SINGLE_PROJECT)
         if path.endswith("/views"):
             return httpx.Response(200, json=[{"id": _GANTT_VIEW_ID, "view_kind": "gantt"}])
         assert f"/views/{_GANTT_VIEW_ID}/tasks" in path
@@ -341,6 +345,72 @@ def test_list_open_falls_back_to_first_view_when_no_list_kind():
     c = _client(handler)
     tasks = c.list_open()
     assert [t.id for t in tasks] == [1]
+
+
+def test_list_projects_paginates_across_pages():
+    # Page 1 is a full page of projects, page 2 has more, page 3 is empty. All of
+    # them must be enumerated (and therefore have their tasks read by list_open).
+    page_size = vikunja._LIST_OPEN_PAGE_SIZE
+    projects_page_1 = [
+        {"id": i, "title": f"p{i}", "is_archived": False} for i in range(1, page_size + 1)
+    ]
+    projects_page_2 = [{"id": page_size + 1, "title": "last", "is_archived": False}]
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            if page == 1:
+                return httpx.Response(200, json=projects_page_1)
+            if page == 2:
+                return httpx.Response(200, json=projects_page_2)
+            return httpx.Response(200, json=[])
+        if path.endswith("/views"):
+            return httpx.Response(200, json=[{"id": 5, "view_kind": "list"}])
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
+        project_id = int(path.split("/projects/")[1].split("/")[0])
+        return httpx.Response(
+            200,
+            json=[{"id": project_id, "title": "t", "priority": 0, "position": 1}],
+        )
+
+    c = _client(handler)
+    tasks = c.list_open()
+    assert sorted(t.id for t in tasks) == list(range(1, page_size + 2))
+
+
+def test_list_open_still_reads_the_write_project_when_not_enumerated():
+    # The client's write-target project id is 3 (see _client). If /api/v1/projects
+    # doesn't include it (e.g. it got archived), list_open must still read it
+    # directly so tasks Jolt itself created there never silently vanish.
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(
+                200, json=[] if page > 1 else [{"id": 2, "title": "Backlog", "is_archived": False}]
+            )
+        if path.endswith("/projects/2/views"):
+            return httpx.Response(200, json=[{"id": 5, "view_kind": "list"}])
+        if path.endswith("/projects/3/views"):
+            return httpx.Response(200, json=[{"id": 6, "view_kind": "list"}])
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
+        if "/views/5/tasks" in path:
+            return httpx.Response(
+                200, json=[{"id": 1, "title": "a", "priority": 0, "position": 1, "project_id": 2}]
+            )
+        if "/views/6/tasks" in path:
+            return httpx.Response(
+                200, json=[{"id": 3, "title": "c", "priority": 0, "position": 1, "project_id": 3}]
+            )
+        raise AssertionError(f"unexpected path {path}")
+
+    tasks = _client(handler).list_open()
+    assert 3 in [t.id for t in tasks]
 
 
 def test_list_view_id_raises_when_views_empty():

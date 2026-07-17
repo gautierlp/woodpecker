@@ -166,13 +166,30 @@ class VikunjaClient:
         # Enumerate every real project live, so newly created projects are picked up with
         # no config change. Skip Vikunja's pseudo-projects (negative ids, e.g. Favorites)
         # and archived projects, whose tasks should not be nagged about.
-        resp = self._request("GET", "/api/v1/projects")
-        if resp is None:
-            raise VikunjaError("list projects got 404")
-        projects = resp.json() or []
+        #
+        # This endpoint paginates too (see the pagination note in _list_open_project): a
+        # page shorter than requested does not mean we are done, only an empty page does.
+        raw_projects: list[dict] = []
+        for page in range(1, _LIST_OPEN_MAX_PAGES + 1):
+            resp = self._request(
+                "GET",
+                "/api/v1/projects",
+                params={"per_page": _LIST_OPEN_PAGE_SIZE, "page": page},
+            )
+            if resp is None:
+                raise VikunjaError("list projects got 404")
+            raw = resp.json() or []
+            if not raw:
+                break
+            raw_projects.extend(raw)
+        else:
+            _log.warning(
+                "list_projects hit the %d-page cap; project enumeration may be incomplete",
+                _LIST_OPEN_MAX_PAGES,
+            )
         return [
             (p["id"], p.get("title", ""))
-            for p in projects
+            for p in raw_projects
             if p["id"] > 0 and not p.get("is_archived", False)
         ]
 
@@ -182,8 +199,19 @@ class VikunjaClient:
         # all of them. A failure to enumerate projects at all is a total failure (fail
         # loud), but a single project's read failing must not take down the others: log
         # and skip it so the rest of the backlog still surfaces.
+        projects = self.list_projects()
+        if self._project_id not in {pid for pid, _ in projects}:
+            # The configured write-target project may be missing from the enumerated
+            # set (e.g. it was archived, or pagination somehow missed it). Tasks Jolt
+            # itself creates there must never silently vanish from the backlog, so read
+            # it directly regardless.
+            _log.warning(
+                "list_open: write-target project %s not in the enumerated set; reading it directly",
+                self._project_id,
+            )
+            projects = [*projects, (self._project_id, "")]
         tasks: list[Task] = []
-        for project_id, project_name in self.list_projects():
+        for project_id, project_name in projects:
             try:
                 tasks.extend(self._list_open_project(project_id, project_name))
             except VikunjaError:
