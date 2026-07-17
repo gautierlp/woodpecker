@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 
-from .models import Task
+from . import config
+from .models import STATUS_PENDING, Task
 from .selection import order_backlog
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -75,4 +76,45 @@ def render_backlog(tasks: list[Task], now: datetime) -> str:
         for task in group:
             suffix = _date_suffix(task.deadline, today)
             lines.append(f"{position[task.id]}. {task.text}{suffix}")
+    return "\n".join(lines)
+
+
+# Priority flag for the morning list, by raw Vikunja priority.
+_PRIO_FLAG = {5: "[critical]", 4: "[urgent]", 3: "[high]", 2: "[med]"}
+
+
+def _matters_key(task: Task, today: date) -> tuple:
+    # Overdue before due-today, then higher priority, then oldest position/creation.
+    overdue_rank = 0 if task.deadline < today else 1
+    return (overdue_rank, -task.priority, task.position, task.created_at)
+
+
+def morning_shown(tasks: list[Task], now: datetime) -> list[Task]:
+    today = now.date()
+    matters = [
+        t
+        for t in tasks
+        if t.status == STATUS_PENDING
+        and t.priority >= config.MATTERS_MIN_PRIORITY
+        and t.deadline is not None
+        and t.deadline <= today
+    ]
+    return sorted(matters, key=lambda t: _matters_key(t, today))
+
+
+def render_matters(tasks: list[Task], now: datetime) -> str:
+    today = now.date()
+    shown = morning_shown(tasks, now)
+    pending = [t for t in tasks if t.status == STATUS_PENDING]
+    hidden = len(pending) - len(shown)
+    lines: list[str] = ["🎯 Today's priorities"]
+    for i, task in enumerate(shown, 1):
+        flag = _PRIO_FLAG.get(task.priority, "")
+        suffix = f" ({(today - task.deadline).days}d overdue)" if task.deadline < today else ""
+        lines.append(f"{i}. {flag} {task.text}{suffix}")
+    if not shown:
+        lines.append("Nothing high-priority is due today. Good.")
+    if hidden > 0:
+        lines.append("")
+        lines.append(f"+ {hidden} more (say 'list' to see everything)")
     return "\n".join(lines)
