@@ -417,7 +417,7 @@ def write_nag(task: Task, now: datetime, client) -> str:
         "name the specific task you are nudging about (quote it or refer to it clearly) "
         "rather than assuming the user knows which one you mean. "
         + guidance
-        + " Never guilt-trip. Never use an em dash (the '-' character); use a comma, a colon, or a "
+        + " Never guilt-trip. Never use em dashes; use a comma, a colon, or a "
         "period instead. This rule has no exceptions."
     )
     lines = [
