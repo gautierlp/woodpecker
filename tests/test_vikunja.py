@@ -195,6 +195,33 @@ def test_list_open_skips_archived_and_pseudo_projects():
     assert all(t.project_id in (2, 3) for t in tasks)
 
 
+def test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others():
+    # Project 2's list view is missing (404), which makes its read fail. Project 3's
+    # read must still succeed and its tasks must still come back; the failure must not
+    # raise out of list_open.
+    projects = [
+        {"id": 2, "title": "Broken", "is_archived": False},
+        {"id": 3, "title": "Personal", "is_archived": False},
+    ]
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            return httpx.Response(200, json=projects)
+        if path.endswith("/projects/2/views"):
+            return httpx.Response(404, json={"message": "not found"})
+        if path.endswith("/projects/3/views"):
+            return httpx.Response(200, json=[{"id": 6, "view_kind": "list"}])
+        if "/views/6/tasks" in path:
+            page = int(request.url.params.get("page", "1"))
+            tasks = [{"id": 3, "title": "c", "priority": 0, "position": 1, "project_id": 3}]
+            return httpx.Response(200, json=[] if page > 1 else tasks)
+        raise AssertionError(f"unexpected path {path}")
+
+    tasks = _client(handler).list_open()
+    assert [t.id for t in tasks] == [3]
+
+
 def test_list_open_tolerates_a_project_with_no_open_tasks():
     def handler(request):
         path = request.url.path
@@ -265,12 +292,9 @@ _SINGLE_PROJECT = [{"id": 3, "title": "P", "is_archived": False}]
 
 
 def test_server_error_raises():
-    def handler(request):
-        if request.url.path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
-        return httpx.Response(500, json={"message": "boom"})
-
-    c = _client(handler)
+    # An error enumerating projects at all (not a single project's read) is a total
+    # failure: list_open must still raise rather than silently return an empty list.
+    c = _client(lambda r: httpx.Response(500, json={"message": "boom"}))
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
 
@@ -319,24 +343,21 @@ def test_list_open_falls_back_to_first_view_when_no_list_kind():
     assert [t.id for t in tasks] == [1]
 
 
-def test_list_open_raises_when_views_empty():
-    def handler(request):
-        if request.url.path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
-        return httpx.Response(200, json=[])
-
-    c = _client(handler)
+def test_list_view_id_raises_when_views_empty():
+    # A project with no views at all is still a hard failure of _list_view_id itself;
+    # list_open just no longer lets one project's failure raise past the loop (see
+    # test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others).
+    c = _client(lambda r: httpx.Response(200, json=[]))
     with pytest.raises(vikunja.VikunjaError):
-        c.list_open()
+        c._list_view_id(3)
 
 
 def test_list_open_raises_on_404():
-    # A 404 here means a misconfigured VIKUNJA_PROJECT_ID, not an empty backlog:
-    # it must raise rather than silently return an empty list.
+    # A 404 enumerating projects at all (not a single project's read) means a
+    # misconfigured Vikunja URL or token: it must raise rather than silently return an
+    # empty list.
     def handler(request):
-        if request.url.path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
-        return httpx.Response(404, json={"message": "project not found"})
+        return httpx.Response(404, json={"message": "not found"})
 
     c = _client(handler)
     with pytest.raises(vikunja.VikunjaError):
@@ -348,8 +369,6 @@ def test_transport_error_surfaces_as_vikunja_error():
     # httpx raise a transport error, not an HTTP-status error. That must also
     # surface as VikunjaError, so callers only ever need to catch one type.
     def handler(request):
-        if request.url.path.endswith("/api/v1/projects"):
-            return httpx.Response(200, json=_SINGLE_PROJECT)
         raise httpx.ConnectError("boom")
 
     c = _client(handler)

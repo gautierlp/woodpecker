@@ -179,10 +179,19 @@ class VikunjaClient:
     def list_open(self) -> list[Task]:
         # Read open tasks from every project and merge them. The write path
         # (create_task) still targets the single configured project; only reading spans
-        # all of them.
+        # all of them. A failure to enumerate projects at all is a total failure (fail
+        # loud), but a single project's read failing must not take down the others: log
+        # and skip it so the rest of the backlog still surfaces.
         tasks: list[Task] = []
         for project_id, project_name in self.list_projects():
-            tasks.extend(self._list_open_project(project_id, project_name))
+            try:
+                tasks.extend(self._list_open_project(project_id, project_name))
+            except VikunjaError:
+                _log.warning(
+                    "list_open: skipping project %s (%s), read failed",
+                    project_id,
+                    project_name,
+                )
         return tasks
 
     def _list_open_project(self, project_id: int, project_name: str) -> list[Task]:
