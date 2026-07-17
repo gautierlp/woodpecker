@@ -170,6 +170,10 @@ def test_nag_stance_drop_for_low_band():
     assert selection.nag_stance(make(1, priority=0)) == "drop"
 
 
+def test_nag_stance_poke_for_mid_band():
+    assert selection.nag_stance(make(1, priority=2)) == "poke"
+
+
 def test_slow_resurface_picks_normal_stale_task():
     t = make(1, created=NOW - timedelta(days=5))
     assert selection.select_slow_resurface([t], NOW).id == 1

@@ -39,9 +39,15 @@ def avoidance_sort_key(task: Task, now: datetime) -> tuple:
 
 
 def nag_stance(task: Task) -> str:
-    """How the nag should lean. 'start' pushes a high-priority task toward action; 'drop'
-    nudges a low-value task toward the exit. Extended to a third 'poke' stance in Task 4."""
-    return "start" if priority_band(task) == BAND_HIGH else "drop"
+    """How the nag leans by priority band: 'start' pushes a high task toward action,
+    'poke' gently checks in on a mid task without drop pressure, 'drop' nudges a low-value
+    task toward the exit."""
+    band = priority_band(task)
+    if band == BAND_HIGH:
+        return "start"
+    if band == BAND_MID:
+        return "poke"
+    return "drop"
 
 
 def order_backlog(tasks: list[Task]) -> list[Task]:

@@ -406,6 +406,22 @@ def _important_task(id=1):
     )
 
 
+def _high_task(id=1, estimate_seconds=None, details="", project_name=""):
+    return Task(
+        id=id,
+        text="file the tax return",
+        priority=4,
+        deadline=None,
+        created_at=datetime(2026, 7, 3, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+        estimate_seconds=estimate_seconds,
+        details=details,
+        project_name=project_name,
+    )
+
+
 def test_log_usage_includes_dollar_cost(caplog):
     # Every Claude call logs its dollar cost, so the persistent log can be summed to see
     # spend over time. A typical interpret call (~4000 in / 60 out) is a fraction of a cent.
@@ -612,3 +628,70 @@ def test_resolve_positions_ignores_stray_task_id_on_add():
     assert resolved[0].action == "add"
     assert resolved[0].text == "buy olive oil"
     assert resolved[0].task_id is None
+
+
+def test_format_duration_reads_common_estimates():
+    assert llm._format_duration(None) is None
+    assert llm._format_duration(900) == "15 min"
+    assert llm._format_duration(3600) == "1h"
+    assert llm._format_duration(7200) == "2h"
+
+
+def test_write_nag_long_high_task_pushes_a_first_step():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_high_task(estimate_seconds=14400), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    user = str(client.messages.calls[0]["messages"]).lower()
+    assert "first" in system  # break it into a first slice
+    assert "4h" in user  # the estimate is surfaced
+
+
+def test_write_nag_short_high_task_says_knock_it_out():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_high_task(estimate_seconds=900), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    user = str(client.messages.calls[0]["messages"]).lower()
+    assert "15 min" in user
+
+
+def test_write_nag_mid_task_is_a_gentle_poke():
+    mid = Task(
+        id=1,
+        text="reorganize the bookmarks",
+        priority=2,
+        deadline=None,
+        created_at=datetime(2026, 7, 3, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+    )
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(mid, datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "gentle" in system or "no pressure" in system or "check in" in system
+
+
+def test_write_nag_includes_description_and_project():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(
+        _high_task(details="the 2025 return on the tax-portal PDF", project_name="Backlog"),
+        datetime(2026, 7, 12, 13, tzinfo=TZ),
+        client,
+    )
+    payload = str(client.messages.calls[0]).lower()
+    assert "tax-portal" in payload
+    assert "backlog" in payload
+
+
+def test_write_focus_includes_duration_details_and_project():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
+    focus = DailyFocus(
+        focus=_high_task(
+            estimate_seconds=7200, details="on the tax-portal PDF", project_name="Backlog"
+        ),
+        rescues=[],
+    )
+    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    payload = str(client.messages.calls[0]).lower()
+    assert "2h" in payload
+    assert "tax-portal" in payload
+    assert "backlog" in payload
