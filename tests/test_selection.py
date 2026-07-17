@@ -207,6 +207,16 @@ def test_slow_resurface_prefers_never_nagged():
     assert selection.select_slow_resurface([never, nagged_long_ago], NOW).id == 1
 
 
+def test_slow_resurface_includes_stale_mid_task():
+    mid = make(1, priority=2, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([mid], NOW).id == 1
+
+
+def test_slow_resurface_excludes_stale_high_task():
+    high = make(1, priority=4, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([high], NOW) is None
+
+
 def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     from jolt import config, selection
 

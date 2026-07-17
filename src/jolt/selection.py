@@ -85,18 +85,19 @@ def select_slow_resurface(
     exclude_id: int | None = None,
     cadence_days: int = config.SLOW_RESURFACE_DAYS,
 ) -> Task | None:
-    """The one low-value, avoided task to poke on the slow cadence, or None.
+    """The one non-high-priority, avoided task to poke on the slow cadence, or None.
 
-    A waved-off normal task should not vanish, but it must not be chased like a frog.
-    Eligible: pending, normal priority, stale, not the excluded focus, and either never
-    nagged or last nagged at least cadence_days ago. Among the eligible, prefer the one
-    that has waited longest for a poke: never-nagged first, then the oldest
-    last_nagged_at, then the oldest task."""
+    A waved-off task should not vanish, but it must not be chased like a frog.
+    Eligible: pending, non-high band (mid or low), stale, not the excluded focus, and
+    either never nagged or last nagged at least cadence_days ago. The nag stance leans
+    gentle-poke for mid and drop-nudge for low. Among the eligible, prefer the one that
+    has waited longest for a poke: never-nagged first, then the oldest last_nagged_at,
+    then the oldest task."""
     eligible = [
         t
         for t in tasks
         if t.status == STATUS_PENDING
-        and priority_band(t) == BAND_LOW
+        and priority_band(t) != BAND_HIGH
         and t.id != exclude_id
         and is_stale(t, now)
         and (t.last_nagged_at is None or now - t.last_nagged_at >= timedelta(days=cadence_days))
