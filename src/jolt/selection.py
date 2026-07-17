@@ -90,8 +90,9 @@ def select_frog(tasks: list[Task], now: datetime) -> Task | None:
     if bumped:
         return max(bumped, key=lambda t: (t.bump_count, t.priority, -t.created_at.timestamp()))
     due_now = [t for t in eligible if t.deadline <= today]
-    pool = due_now or eligible
-    return max(pool, key=lambda t: (t.priority, -t.created_at.timestamp()))
+    if not due_now:
+        return None
+    return max(due_now, key=lambda t: (t.priority, -t.created_at.timestamp()))
 
 
 def is_quiet_hours(

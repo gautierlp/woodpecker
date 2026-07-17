@@ -267,3 +267,10 @@ def test_select_frog_excludes_low_priority_and_undated():
 
 def test_select_frog_none_when_no_eligible_tasks():
     assert selection.select_frog([make(1, priority=0)], NOW) is None
+
+
+def test_select_frog_none_when_no_bumps_and_nothing_due_yet():
+    # No task has been bumped and nothing is due today/overdue: no frog, even though a
+    # future-dated priority task is eligible.
+    future = replace(make(1, priority=4), deadline=NOW.date() + timedelta(days=3))
+    assert selection.select_frog([future], NOW) is None
