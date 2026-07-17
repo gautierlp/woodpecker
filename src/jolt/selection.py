@@ -24,6 +24,20 @@ def priority_sort_key(task: Task) -> tuple:
     return (_BAND_RANK[priority_band(task)], deadline_rank, task.position, task.created_at)
 
 
+def avoidance_sort_key(task: Task, now: datetime) -> tuple:
+    """Ranking for what to drag into the light: high band first, then stale-before-fresh,
+    then the longer estimate (the bigger avoided thing leads), then the ordinary order."""
+    stale_rank = 0 if is_stale(task, now) else 1
+    return (
+        _BAND_RANK[priority_band(task)],
+        stale_rank,
+        -(task.estimate_seconds or 0),
+        task.deadline or date.max,
+        task.position,
+        task.created_at,
+    )
+
+
 def nag_stance(task: Task) -> str:
     """How the nag should lean. 'start' pushes a high-priority task toward action; 'drop'
     nudges a low-value task toward the exit. Extended to a third 'poke' stance in Task 4."""
@@ -42,15 +56,12 @@ def is_stale(task: Task, now: datetime, threshold_days: int = config.STALE_THRES
 
 
 def select_daily_focus(tasks: list[Task], now: datetime) -> DailyFocus:
-    ordered = order_backlog(tasks)
-    if not ordered:
+    pending = [t for t in tasks if t.status == STATUS_PENDING]
+    if not pending:
         return DailyFocus(focus=None, rescues=[])
-    # Avoidance wins the lead spot: an important task that has gone stale is the
-    # deferral signal, so it leads even over a fresher, nearer-deadline one. Only when
-    # nothing important is being dodged does the lead fall back to the top of the order.
-    stale_important = [t for t in ordered if priority_band(t) == BAND_HIGH and is_stale(t, now)]
-    focus = stale_important[0] if stale_important else ordered[0]
-    rescues = [t for t in ordered if t.id != focus.id and is_stale(t, now)][:2]
+    by_avoidance = sorted(pending, key=lambda t: avoidance_sort_key(t, now))
+    focus = by_avoidance[0]
+    rescues = [t for t in by_avoidance if t.id != focus.id and is_stale(t, now)][:2]
     return DailyFocus(focus=focus, rescues=rescues)
 
 

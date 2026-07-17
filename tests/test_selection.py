@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -127,6 +128,24 @@ def test_lead_falls_back_to_top_priority_when_no_important_is_stale():
     fresh_imp = make(1, priority=4, created=NOW)
     stale_normal = make(2, priority=0, created=NOW - timedelta(days=5))
     result = selection.select_daily_focus([fresh_imp, stale_normal], NOW)
+    assert result.focus.id == 1
+
+
+def test_longer_stale_high_task_leads_the_focus():
+    # Two stale high tasks; the longer-estimated one is the bigger avoided thing and leads.
+    short = make(1, priority=4, created=NOW - timedelta(days=5))
+    long = make(2, priority=4, created=NOW - timedelta(days=5))
+    short = replace(short, estimate_seconds=900)
+    long = replace(long, estimate_seconds=14400)
+    result = selection.select_daily_focus([short, long], NOW)
+    assert result.focus.id == 2
+
+
+def test_estimate_only_breaks_ties_within_stale_high_not_across_bands():
+    # A short stale high task still leads a long stale low task: band wins over duration.
+    high_short = replace(make(1, priority=4, created=NOW - timedelta(days=5)), estimate_seconds=300)
+    low_long = replace(make(2, priority=0, created=NOW - timedelta(days=5)), estimate_seconds=14400)
+    result = selection.select_daily_focus([high_short, low_long], NOW)
     assert result.focus.id == 1
 
 
