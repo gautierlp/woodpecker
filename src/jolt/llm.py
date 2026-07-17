@@ -6,7 +6,7 @@ from anthropic import Anthropic
 
 from . import config, render
 from .models import DailyFocus, STATUS_PENDING, Task
-from .selection import BAND_HIGH, nag_stance, priority_band
+from .selection import BAND_HIGH, BAND_MID, nag_stance, priority_band
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,19 @@ def _log_usage(label: str, response) -> None:
 
 
 def _importance(task: Task) -> str:
-    return "important" if priority_band(task) == BAND_HIGH else "normal"
+    band = priority_band(task)
+    if band == BAND_HIGH:
+        return "important"
+    if band == BAND_MID:
+        return "medium"
+    return "normal"
 
 
 def _format_duration(seconds: int | None) -> str | None:
     if not seconds:
         return None
+    if seconds < 60:
+        return "<1 min"
     minutes = seconds // 60
     if minutes < 60:
         return f"{minutes} min"
@@ -379,26 +386,24 @@ def write_nag(task: Task, now: datetime, client) -> str:
     age = (now - task.created_at).days
     stance = nag_stance(task)
     duration = _format_duration(task.estimate_seconds)
-    is_long = bool(task.estimate_seconds and task.estimate_seconds >= config.LONG_DURATION_SECONDS)
-    is_short = bool(task.estimate_seconds and task.estimate_seconds < config.LONG_DURATION_SECONDS)
     if stance == "start":
-        if is_long:
-            guidance = (
-                "This task matters and is a big one. Do not say 'just do it'. Push toward a "
-                "small first slice: ask what is blocking it and name a concrete 15-minute first "
-                "step. The older it is and the later in the day, the blunter you get."
-            )
-        elif is_short:
-            guidance = (
-                "This task matters and is short. Push to knock it out right now: it is small "
-                "enough to just finish. The later in the day, the blunter and more insistent."
-            )
-        else:
+        if not task.estimate_seconds:
             guidance = (
                 "This task matters. Push toward starting it: first ask what is actually blocking "
                 "it and offer to break it down into a small first step. The older it is and the "
                 "later in the day, the blunter and more insistent you get, up to a flat 'do it or "
                 "delete it' by evening."
+            )
+        elif task.estimate_seconds >= config.LONG_DURATION_SECONDS:
+            guidance = (
+                "This task matters and is a big one. Do not say 'just do it'. Push toward a "
+                "small first slice: ask what is blocking it and name a concrete 15-minute first "
+                "step. The older it is and the later in the day, the blunter you get."
+            )
+        else:
+            guidance = (
+                "This task matters and is short. Push to knock it out right now: it is small "
+                "enough to just finish. The later in the day, the blunter and more insistent."
             )
     elif stance == "poke":
         guidance = (

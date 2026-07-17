@@ -637,6 +637,12 @@ def test_format_duration_reads_common_estimates():
     assert llm._format_duration(7200) == "2h"
 
 
+def test_format_duration_sub_minute_estimates():
+    assert llm._format_duration(30) == "<1 min"
+    assert llm._format_duration(59) == "<1 min"
+    assert llm._format_duration(60) == "1 min"
+
+
 def test_write_nag_long_high_task_pushes_a_first_step():
     client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
     llm.write_nag(_high_task(estimate_seconds=14400), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
@@ -653,9 +659,9 @@ def test_write_nag_short_high_task_says_knock_it_out():
     assert "15 min" in user
 
 
-def test_write_nag_mid_task_is_a_gentle_poke():
-    mid = Task(
-        id=1,
+def _mid_task(id=1):
+    return Task(
+        id=id,
         text="reorganize the bookmarks",
         priority=2,
         deadline=None,
@@ -664,10 +670,23 @@ def test_write_nag_mid_task_is_a_gentle_poke():
         last_nagged_at=None,
         completed_at=None,
     )
+
+
+def test_write_nag_mid_task_is_a_gentle_poke():
     client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(mid, datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
     system = client.messages.calls[0]["system"].lower()
     assert "gentle" in system or "no pressure" in system or "check in" in system
+
+
+def test_write_nag_mid_task_importance_is_medium_not_normal():
+    # A Mid-band task's Importance line must read "medium", not "normal": the wording
+    # must not contradict the gentle-poke guidance it also receives.
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    user = str(client.messages.calls[0]["messages"])
+    assert "Importance: medium." in user
+    assert "Importance: normal." not in user
 
 
 def test_write_nag_includes_description_and_project():
