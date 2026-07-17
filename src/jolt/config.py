@@ -7,6 +7,10 @@ SLOW_RESURFACE_DAYS = 7  # a waved-off normal, stale task is re-poked at most on
 QUIET_START_HOUR = 6  # first hour of the day pings are allowed
 QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
 NAG_HOURS = (9, 13, 19)
+# Priority bands derived from the raw Vikunja priority (0-5). High pushes hard, Mid gets a
+# gentle poke, Low/unset gets nudged toward dropping. See selection.priority_band.
+PRIORITY_HIGH_MIN = 3  # priority >= 3 -> high band
+PRIORITY_MID_MIN = 1  # priority 1-2 -> mid band; 0 -> low band
 DAILY_FOCUS_HOUR = 6
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"

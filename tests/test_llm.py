@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from jolt import llm
-from jolt.models import DailyFocus, PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_PENDING, Task
+from jolt.models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -60,7 +60,7 @@ def _task(id=1):
     return Task(
         id=id,
         text="taxes",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status=STATUS_PENDING,
@@ -75,7 +75,7 @@ def _ordered_task(id, day):
     return Task(
         id=id,
         text=f"task {id}",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, day, tzinfo=TZ),
         status=STATUS_PENDING,
@@ -160,7 +160,7 @@ def test_prompt_drops_snapshot_task_that_is_no_longer_pending():
     done = Task(
         id=45,
         text="task 45",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status="done",
@@ -397,7 +397,7 @@ def _important_task(id=1):
     return Task(
         id=id,
         text="file the tax return",
-        priority=PRIORITY_IMPORTANT,
+        priority=4,
         deadline=None,
         created_at=datetime(2026, 7, 3, tzinfo=TZ),
         status=STATUS_PENDING,

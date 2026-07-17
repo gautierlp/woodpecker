@@ -5,8 +5,8 @@ from datetime import date, datetime
 from anthropic import Anthropic
 
 from . import config, render
-from .models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
-from .selection import nag_stance
+from .models import DailyFocus, STATUS_PENDING, Task
+from .selection import BAND_HIGH, nag_stance, priority_band
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _log_usage(label: str, response) -> None:
 
 
 def _importance(task: Task) -> str:
-    return "important" if task.priority == PRIORITY_IMPORTANT else "normal"
+    return "important" if priority_band(task) == BAND_HIGH else "normal"
 
 
 @dataclass(frozen=True)
@@ -143,7 +143,7 @@ def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime)
         return "(backlog is empty)"
     return "\n".join(
         f"- {pos}: {t.text}"
-        + (" [important]" if t.priority == "important" else "")
+        + (" [important]" if priority_band(t) == BAND_HIGH else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
         for pos, t in numbered
     )

@@ -98,7 +98,7 @@ def test_drop_unknown_id_is_graceful():
 
 def test_list_intent_renders_backlog():
     store = fresh()
-    store.add_task("call vet", "important", None, NOW)
+    store.add_task("call vet", 4, None, NOW)
     reply = orchestrator.apply_intent(store, Intent(action="list"), NOW)
     assert "call vet" in reply
     assert reply.startswith("📋 ")

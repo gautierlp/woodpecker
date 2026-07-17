@@ -7,7 +7,6 @@ import httpx
 
 from .models import (
     PRIORITY_IMPORTANT,
-    PRIORITY_NORMAL,
     STATUS_DONE,
     STATUS_PENDING,
     Task,
@@ -62,20 +61,23 @@ def clean_description(description: str | None) -> str:
     return _ESTIMATE_RE.sub("", description).strip()
 
 
-def vikunja_to_task(raw: dict) -> Task:
+def vikunja_to_task(raw: dict, project_name: str = "") -> Task:
     done = bool(raw.get("done"))
+    description = raw.get("description") or ""
     return Task(
         id=raw["id"],
         text=raw.get("title", ""),
-        priority=PRIORITY_IMPORTANT
-        if (raw.get("priority") or 0) >= PRIORITY_IMPORTANT_VALUE
-        else PRIORITY_NORMAL,
+        priority=int(raw.get("priority") or 0),
         deadline=_parse_due(raw.get("due_date")),
         created_at=_parse_dt(raw.get("created")) or datetime.now(_UTC),
         status=STATUS_DONE if done else STATUS_PENDING,
         last_nagged_at=None,
         completed_at=_parse_dt(raw.get("done_at")) if done else None,
         position=raw.get("position") or 0,
+        estimate_seconds=parse_estimate_seconds(description),
+        details=clean_description(description),
+        project_id=int(raw.get("project_id") or 0),
+        project_name=project_name,
     )
 
 

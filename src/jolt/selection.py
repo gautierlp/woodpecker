@@ -1,21 +1,33 @@
 from datetime import date, datetime, timedelta
 
 from . import config
-from .models import DailyFocus, PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_PENDING, Task
+from .models import DailyFocus, STATUS_PENDING, Task
+
+BAND_HIGH = "high"
+BAND_MID = "mid"
+BAND_LOW = "low"
+
+
+def priority_band(task: Task) -> str:
+    if task.priority >= config.PRIORITY_HIGH_MIN:
+        return BAND_HIGH
+    if task.priority >= config.PRIORITY_MID_MIN:
+        return BAND_MID
+    return BAND_LOW
+
+
+_BAND_RANK = {BAND_HIGH: 0, BAND_MID: 1, BAND_LOW: 2}
 
 
 def priority_sort_key(task: Task) -> tuple:
-    prio_rank = 0 if task.priority == PRIORITY_IMPORTANT else 1
     deadline_rank = task.deadline or date.max
-    return (prio_rank, deadline_rank, task.position, task.created_at)
+    return (_BAND_RANK[priority_band(task)], deadline_rank, task.position, task.created_at)
 
 
 def nag_stance(task: Task) -> str:
-    """How the nag should lean. 'start' pushes an important task toward action (what is
-    blocking it, break it down). 'drop' nudges a low-value task toward the exit with a
-    zero-based question. Importance is the whole signal here: age only gates whether the
-    task is nagged at all, not how the nag leans."""
-    return "start" if task.priority == PRIORITY_IMPORTANT else "drop"
+    """How the nag should lean. 'start' pushes a high-priority task toward action; 'drop'
+    nudges a low-value task toward the exit. Extended to a third 'poke' stance in Task 4."""
+    return "start" if priority_band(task) == BAND_HIGH else "drop"
 
 
 def order_backlog(tasks: list[Task]) -> list[Task]:
@@ -36,7 +48,7 @@ def select_daily_focus(tasks: list[Task], now: datetime) -> DailyFocus:
     # Avoidance wins the lead spot: an important task that has gone stale is the
     # deferral signal, so it leads even over a fresher, nearer-deadline one. Only when
     # nothing important is being dodged does the lead fall back to the top of the order.
-    stale_important = [t for t in ordered if t.priority == PRIORITY_IMPORTANT and is_stale(t, now)]
+    stale_important = [t for t in ordered if priority_band(t) == BAND_HIGH and is_stale(t, now)]
     focus = stale_important[0] if stale_important else ordered[0]
     rescues = [t for t in ordered if t.id != focus.id and is_stale(t, now)][:2]
     return DailyFocus(focus=focus, rescues=rescues)
@@ -67,7 +79,7 @@ def select_slow_resurface(
         t
         for t in tasks
         if t.status == STATUS_PENDING
-        and t.priority == PRIORITY_NORMAL
+        and priority_band(t) == BAND_LOW
         and t.id != exclude_id
         and is_stale(t, now)
         and (t.last_nagged_at is None or now - t.last_nagged_at >= timedelta(days=cadence_days))

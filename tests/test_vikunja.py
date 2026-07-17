@@ -27,7 +27,10 @@ def test_parse_estimate_tolerates_whitespace_in_sentinel():
 
 def test_clean_description_strips_the_sentinel_and_trims():
     assert vikunja.clean_description("<!-- mdone:estimate=3600 -->") == ""
-    assert vikunja.clean_description("call the accountant <!-- mdone:estimate=1800 -->") == "call the accountant"
+    assert (
+        vikunja.clean_description("call the accountant <!-- mdone:estimate=1800 -->")
+        == "call the accountant"
+    )
     assert vikunja.clean_description(None) == ""
 
 
@@ -55,7 +58,7 @@ def test_maps_basic_open_task():
     t = vikunja.vikunja_to_task(_raw())
     assert t.id == 7
     assert t.text == "Call the vet"
-    assert t.priority == PRIORITY_NORMAL
+    assert t.priority == 0
     assert t.status == STATUS_PENDING
     assert t.deadline is None
     assert t.position == 12
@@ -63,10 +66,25 @@ def test_maps_basic_open_task():
     assert t.completed_at is None
 
 
-def test_high_priority_maps_to_important():
-    assert vikunja.vikunja_to_task(_raw(priority=4)).priority == PRIORITY_IMPORTANT
-    assert vikunja.vikunja_to_task(_raw(priority=5)).priority == PRIORITY_IMPORTANT
-    assert vikunja.vikunja_to_task(_raw(priority=3)).priority == PRIORITY_NORMAL
+def test_priority_is_stored_raw():
+    assert vikunja.vikunja_to_task(_raw(priority=0)).priority == 0
+    assert vikunja.vikunja_to_task(_raw(priority=3)).priority == 3
+    assert vikunja.vikunja_to_task(_raw(priority=5)).priority == 5
+
+
+def test_maps_estimate_and_clean_description_and_project():
+    raw = _raw(description="file it <!-- mdone:estimate=1800 -->", project_id=2)
+    t = vikunja.vikunja_to_task(raw, project_name="Backlog")
+    assert t.estimate_seconds == 1800
+    assert t.details == "file it"
+    assert t.project_id == 2
+    assert t.project_name == "Backlog"
+
+
+def test_maps_missing_description_to_no_estimate_empty_details():
+    t = vikunja.vikunja_to_task(_raw())
+    assert t.estimate_seconds is None
+    assert t.details == ""
 
 
 def test_due_date_round_trips_to_local_date():
@@ -169,7 +187,7 @@ def test_list_open_maps_all_returned_tasks():
     c = _client(handler)
     tasks = c.list_open()
     assert [t.id for t in tasks] == [1, 2]
-    assert tasks[1].priority == PRIORITY_IMPORTANT
+    assert tasks[1].priority == 4
     assert hits["list_view_tasks"] > 0
     assert hits["plain_tasks"] == 0
     assert hits["views"] == 1
