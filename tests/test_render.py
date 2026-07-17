@@ -2,7 +2,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from jolt import render
-from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_PENDING, Task
+from jolt.models import STATUS_PENDING, Task
 
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 4, 12, tzinfo=TZ)  # a Saturday
@@ -10,7 +10,7 @@ TODAY = NOW.date()
 FRESH = datetime(2026, 7, 3, tzinfo=TZ)  # 1 day old at NOW
 
 
-def make(id, *, text, priority=PRIORITY_NORMAL, deadline=None, created_at=FRESH, position=0):
+def make(id, *, text, priority=0, deadline=None, created_at=FRESH, position=0):
     return Task(
         id=id,
         text=text,
@@ -45,7 +45,7 @@ def test_header_singular_for_one_task():
 def test_lines_are_numbered_by_display_position_not_id():
     # The visible number is the task's position in the list, not its stable db id, so a
     # single task shows as "1." whatever its id. The id is a hidden internal handle.
-    task = make(7, text="call vet", priority=PRIORITY_IMPORTANT, deadline=date(2026, 12, 1))
+    task = make(7, text="call vet", priority=4, deadline=date(2026, 12, 1))
     assert task_line(task).startswith("1. ")
 
 

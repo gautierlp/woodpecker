@@ -45,7 +45,7 @@ class FakeVikunja:
         return self._open.pop(task_id, None) is not None
 
 
-def _task(id, priority="normal", deadline=None, created_at=None):
+def _task(id, priority=0, deadline=None, created_at=None):
     return Task(
         id=id,
         text=f"task {id}",
@@ -96,7 +96,7 @@ def collector():
 
 def test_daily_focus_sends_prose_then_backlog():
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, "important", created_at=now)])
+    store = fresh([_task(1, 4, created_at=now)])
     sent, send = collector()
     scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
     assert len(sent) == 1
@@ -111,8 +111,8 @@ def test_daily_focus_snapshots_the_order_it_shows():
     # It must snapshot the exact order shown, keyed by chat, so the next number lines up
     # with what the user is looking at. Here 'a' is important, 'b' normal, so a ranks first.
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    a = _task(1, "important", created_at=now)
-    b = _task(2, "normal", created_at=now)
+    a = _task(1, 4, created_at=now)
+    b = _task(2, 0, created_at=now)
     store = fresh([a, b])
     sent, send = collector()
     scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
@@ -187,8 +187,8 @@ def test_slow_resurface_nags_a_normal_stale_nonfocus_task():
     now = datetime(2026, 7, 12, 13, tzinfo=TZ)
     store = fresh(
         [
-            _task(1, "important", created_at=created),  # becomes focus
-            _task(2, "normal", created_at=created),  # tadpole
+            _task(1, 4, created_at=created),  # becomes focus
+            _task(2, 0, created_at=created),  # tadpole
         ]
     )
     sent, send = collector()
@@ -204,8 +204,8 @@ def test_slow_resurface_gated_by_cadence():
     now = datetime(2026, 7, 12, 13, tzinfo=TZ)
     store = fresh(
         [
-            _task(1, "important", created_at=created),
-            _task(2, "normal", created_at=created),
+            _task(1, 4, created_at=created),
+            _task(2, 0, created_at=created),
         ]
     )
     store.mark_nagged(2, datetime(2026, 7, 11, 13, tzinfo=TZ))  # poked yesterday
@@ -216,7 +216,7 @@ def test_slow_resurface_gated_by_cadence():
 
 def test_daily_focus_sends_a_fallback_when_the_llm_fails():
     now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, "important", created_at=now)])
+    store = fresh([_task(1, 4, created_at=now)])
     sent, send = collector()
     scheduler.send_daily_focus(store, send, RaisingClient(), now, chat_id=42)
     assert len(sent) == 1  # the user hears about it rather than silence
@@ -256,8 +256,8 @@ def test_nags_attempt_the_tadpole_even_if_the_frog_nag_fails():
     now = datetime(2026, 7, 12, 13, tzinfo=TZ)
     store = fresh(
         [
-            _task(1, "important", created_at=created),
-            _task(2, "normal", created_at=created),
+            _task(1, 4, created_at=created),
+            _task(2, 0, created_at=created),
         ]
     )
     sent, send = collector()

@@ -5,8 +5,8 @@ from datetime import date, datetime
 from anthropic import Anthropic
 
 from . import config, render
-from .models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
-from .selection import nag_stance
+from .models import DailyFocus, STATUS_PENDING, Task
+from .selection import BAND_HIGH, BAND_MID, nag_stance, priority_band
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,24 @@ def _log_usage(label: str, response) -> None:
 
 
 def _importance(task: Task) -> str:
-    return "important" if task.priority == PRIORITY_IMPORTANT else "normal"
+    band = priority_band(task)
+    if band == BAND_HIGH:
+        return "important"
+    if band == BAND_MID:
+        return "medium"
+    return "normal"
+
+
+def _format_duration(seconds: int | None) -> str | None:
+    if not seconds:
+        return None
+    if seconds < 60:
+        return "<1 min"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    hours = minutes / 60
+    return f"{int(hours)}h" if hours == int(hours) else f"{hours:.1f}h"
 
 
 @dataclass(frozen=True)
@@ -143,7 +160,7 @@ def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime)
         return "(backlog is empty)"
     return "\n".join(
         f"- {pos}: {t.text}"
-        + (" [important]" if t.priority == "important" else "")
+        + (" [important]" if priority_band(t) == BAND_HIGH else "")
         + (f" (due {t.deadline.isoformat()})" if t.deadline else "")
         for pos, t in numbered
     )
@@ -346,7 +363,15 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
         "Never use an em dash (the '—' character). Use a comma, a colon, or a period instead. "
         "This rule has no exceptions."
     )
-    user = f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)}). Rescues: {rescues}."
+    focus_bits = [f"Focus task: {focus.focus.text} ({age}d old, {_importance(focus.focus)})"]
+    focus_duration = _format_duration(focus.focus.estimate_seconds)
+    if focus_duration:
+        focus_bits.append(f"est {focus_duration}")
+    if focus.focus.project_name:
+        focus_bits.append(f"in {focus.focus.project_name}")
+    focus_line = ", ".join(focus_bits)
+    details_line = f" Notes: {focus.focus.details}." if focus.focus.details else ""
+    user = f"{focus_line}. Rescues: {rescues}.{details_line}"
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=300,
@@ -360,19 +385,36 @@ def write_focus(focus: DailyFocus, now: datetime, client) -> str:
 def write_nag(task: Task, now: datetime, client) -> str:
     age = (now - task.created_at).days
     stance = nag_stance(task)
+    duration = _format_duration(task.estimate_seconds)
     if stance == "start":
+        if not task.estimate_seconds:
+            guidance = (
+                "This task matters. Push toward starting it: first ask what is actually blocking "
+                "it and offer to break it down into a small first step. The older it is and the "
+                "later in the day, the blunter and more insistent you get, up to a flat 'do it or "
+                "delete it' by evening."
+            )
+        elif task.estimate_seconds >= config.LONG_DURATION_SECONDS:
+            guidance = (
+                "This task matters and is a big one. Do not say 'just do it'. Push toward a "
+                "small first slice: ask what is blocking it and name a concrete 15-minute first "
+                "step. The older it is and the later in the day, the blunter you get."
+            )
+        else:
+            guidance = (
+                "This task matters and is short. Push to knock it out right now: it is small "
+                "enough to just finish. The later in the day, the blunter and more insistent."
+            )
+    elif stance == "poke":
         guidance = (
-            "This task matters. Push toward starting it: first ask what is actually blocking "
-            "it and offer to break it down into a small first step. The older it is and the "
-            "later in the day, the blunter and more insistent you get, up to a flat 'do it or "
-            "delete it' by evening."
+            "This task is mid-priority. Give it a gentle check-in with no pressure to drop it: "
+            "ask if today is the day for it or offer a small next step. Stay light."
         )
     else:
         guidance = (
-            "This task is low-stakes and has been sitting untouched. Do not chase it to get "
-            "done. Instead nudge toward dropping it with a zero-based question: if it were not "
-            "already on the list, would they add it today? Still want it, or drop it? Stay "
-            "light and easy to wave off."
+            "This task is low-stakes and has been sitting untouched. Do not chase it. Nudge "
+            "toward dropping it with a zero-based question: if it were not already on the list, "
+            "would they add it today? Still want it, or drop it? Stay easy to wave off."
         )
     system = (
         "You are Jolt. Write one short nag (1 to 2 lines) about the task below. "
@@ -380,13 +422,22 @@ def write_nag(task: Task, now: datetime, client) -> str:
         "name the specific task you are nudging about (quote it or refer to it clearly) "
         "rather than assuming the user knows which one you mean. "
         + guidance
-        + " Never guilt-trip. Never use an em dash (the '—' character); use a comma, a colon, or a "
+        + " Never guilt-trip. Never use em dashes; use a comma, a colon, or a "
         "period instead. This rule has no exceptions."
     )
-    user = (
-        f"Task: {task.text}. Importance: {_importance(task)}. Age: {age} days. "
-        f"Current hour: {now.hour}."
-    )
+    lines = [
+        f"Task: {task.text}.",
+        f"Importance: {_importance(task)}.",
+        f"Age: {age} days.",
+        f"Current hour: {now.hour}.",
+    ]
+    if duration:
+        lines.append(f"Estimated time: {duration}.")
+    if task.details:
+        lines.append(f"Notes: {task.details}.")
+    if task.project_name:
+        lines.append(f"Project: {task.project_name}.")
+    user = " ".join(lines)
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=200,

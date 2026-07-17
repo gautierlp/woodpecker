@@ -9,7 +9,7 @@ import httpx
 from jolt import bot, sidecar
 from jolt.llm import Intent
 from jolt.memory import ConversationMemory
-from jolt.models import STATUS_PENDING, Task
+from jolt.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
 from jolt.store import Store
 from jolt.vikunja import VikunjaClient, VikunjaError
 
@@ -25,10 +25,12 @@ class FakeVikunja:
         return list(self._open.values())
 
     def create_task(self, text, priority, deadline):
+        # Mimics VikunjaClient.create_task: the read model stores the raw int priority,
+        # not the creation-vocabulary string.
         task = Task(
             id=self._next_id,
             text=text,
-            priority=priority,
+            priority=4 if priority == PRIORITY_IMPORTANT else 0,
             deadline=deadline,
             created_at=datetime.now(timezone.utc),
             status=STATUS_PENDING,
@@ -54,7 +56,7 @@ def _task(id, created_at=None):
     return Task(
         id=id,
         text=f"task {id}",
-        priority="normal",
+        priority=0,
         deadline=None,
         created_at=created_at or datetime(2026, 7, 1, tzinfo=TZ),
         status=STATUS_PENDING,

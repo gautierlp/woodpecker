@@ -1,10 +1,9 @@
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from jolt import selection
 from jolt.models import (
-    PRIORITY_IMPORTANT,
-    PRIORITY_NORMAL,
     STATUS_DONE,
     STATUS_PENDING,
     Task,
@@ -17,7 +16,7 @@ NOW = datetime(2026, 7, 12, 8, tzinfo=TZ)
 def make(
     id,
     *,
-    priority=PRIORITY_NORMAL,
+    priority=0,
     deadline=None,
     created=NOW,
     status=STATUS_PENDING,
@@ -41,7 +40,7 @@ def _t(id, position, created="2026-07-10T08:00:00+00:00"):
     return Task(
         id=id,
         text=f"t{id}",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime.fromisoformat(created),
         status=STATUS_PENDING,
@@ -57,10 +56,19 @@ def test_position_breaks_ties_when_priority_and_deadline_equal():
     assert [t.id for t in ordered] == [2, 3, 1]
 
 
-def test_important_sorts_before_normal():
-    normal = make(1, priority=PRIORITY_NORMAL)
-    important = make(2, priority=PRIORITY_IMPORTANT)
-    assert [t.id for t in selection.order_backlog([normal, important])] == [2, 1]
+def test_priority_band_maps_raw_priority():
+    assert selection.priority_band(make(1, priority=5)) == selection.BAND_HIGH
+    assert selection.priority_band(make(2, priority=3)) == selection.BAND_HIGH
+    assert selection.priority_band(make(3, priority=2)) == selection.BAND_MID
+    assert selection.priority_band(make(4, priority=1)) == selection.BAND_MID
+    assert selection.priority_band(make(5, priority=0)) == selection.BAND_LOW
+
+
+def test_high_band_sorts_before_mid_before_low():
+    low = make(1, priority=0)
+    mid = make(2, priority=2)
+    high = make(3, priority=4)
+    assert [t.id for t in selection.order_backlog([low, mid, high])] == [3, 2, 1]
 
 
 def test_earlier_deadline_wins_within_same_priority():
@@ -94,7 +102,7 @@ def test_is_stale_false_for_done():
 
 
 def test_select_daily_focus_picks_top_and_two_rescues():
-    focus = make(1, priority=PRIORITY_IMPORTANT, created=NOW)
+    focus = make(1, priority=4, created=NOW)
     old_a = make(2, created=NOW - timedelta(days=5))
     old_b = make(3, created=NOW - timedelta(days=4))
     old_c = make(4, created=NOW - timedelta(days=6))
@@ -108,18 +116,36 @@ def test_select_daily_focus_picks_top_and_two_rescues():
 def test_stale_important_leads_and_is_not_also_a_rescue():
     # A fresh important task with the nearest deadline would win the ordinary priority
     # order, but an avoided (stale) important task must take the lead instead.
-    fresh_imp = make(1, priority=PRIORITY_IMPORTANT, deadline=date(2026, 7, 13), created=NOW)
-    stale_imp = make(2, priority=PRIORITY_IMPORTANT, created=NOW - timedelta(days=5))
-    stale_normal = make(3, priority=PRIORITY_NORMAL, created=NOW - timedelta(days=6))
+    fresh_imp = make(1, priority=4, deadline=date(2026, 7, 13), created=NOW)
+    stale_imp = make(2, priority=4, created=NOW - timedelta(days=5))
+    stale_normal = make(3, priority=0, created=NOW - timedelta(days=6))
     result = selection.select_daily_focus([fresh_imp, stale_imp, stale_normal], NOW)
     assert result.focus.id == 2
     assert 2 not in [t.id for t in result.rescues]
 
 
 def test_lead_falls_back_to_top_priority_when_no_important_is_stale():
-    fresh_imp = make(1, priority=PRIORITY_IMPORTANT, created=NOW)
-    stale_normal = make(2, priority=PRIORITY_NORMAL, created=NOW - timedelta(days=5))
+    fresh_imp = make(1, priority=4, created=NOW)
+    stale_normal = make(2, priority=0, created=NOW - timedelta(days=5))
     result = selection.select_daily_focus([fresh_imp, stale_normal], NOW)
+    assert result.focus.id == 1
+
+
+def test_longer_stale_high_task_leads_the_focus():
+    # Two stale high tasks; the longer-estimated one is the bigger avoided thing and leads.
+    short = make(1, priority=4, created=NOW - timedelta(days=5))
+    long = make(2, priority=4, created=NOW - timedelta(days=5))
+    short = replace(short, estimate_seconds=900)
+    long = replace(long, estimate_seconds=14400)
+    result = selection.select_daily_focus([short, long], NOW)
+    assert result.focus.id == 2
+
+
+def test_estimate_only_breaks_ties_within_stale_high_not_across_bands():
+    # A short stale high task still leads a long stale low task: band wins over duration.
+    high_short = replace(make(1, priority=4, created=NOW - timedelta(days=5)), estimate_seconds=300)
+    low_long = replace(make(2, priority=0, created=NOW - timedelta(days=5)), estimate_seconds=14400)
+    result = selection.select_daily_focus([high_short, low_long], NOW)
     assert result.focus.id == 1
 
 
@@ -136,12 +162,16 @@ def test_quiet_hours():
     assert selection.is_quiet_hours(datetime(2026, 7, 12, 23, tzinfo=TZ)) is True
 
 
-def test_nag_stance_start_for_important():
-    assert selection.nag_stance(make(1, priority=PRIORITY_IMPORTANT)) == "start"
+def test_nag_stance_start_for_high_band():
+    assert selection.nag_stance(make(1, priority=4)) == "start"
 
 
-def test_nag_stance_drop_for_normal():
-    assert selection.nag_stance(make(1, priority=PRIORITY_NORMAL)) == "drop"
+def test_nag_stance_drop_for_low_band():
+    assert selection.nag_stance(make(1, priority=0)) == "drop"
+
+
+def test_nag_stance_poke_for_mid_band():
+    assert selection.nag_stance(make(1, priority=2)) == "poke"
 
 
 def test_slow_resurface_picks_normal_stale_task():
@@ -151,7 +181,7 @@ def test_slow_resurface_picks_normal_stale_task():
 
 def test_slow_resurface_none_when_nothing_eligible():
     fresh = make(1, created=NOW)  # not stale
-    important = make(2, priority=PRIORITY_IMPORTANT, created=NOW - timedelta(days=5))
+    important = make(2, priority=4, created=NOW - timedelta(days=5))
     assert selection.select_slow_resurface([fresh, important], NOW) is None
 
 
@@ -177,6 +207,16 @@ def test_slow_resurface_prefers_never_nagged():
     assert selection.select_slow_resurface([never, nagged_long_ago], NOW).id == 1
 
 
+def test_slow_resurface_includes_stale_mid_task():
+    mid = make(1, priority=2, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([mid], NOW).id == 1
+
+
+def test_slow_resurface_excludes_stale_high_task():
+    high = make(1, priority=4, created=NOW - timedelta(days=5))
+    assert selection.select_slow_resurface([high], NOW) is None
+
+
 def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     from jolt import config, selection
 
@@ -186,7 +226,7 @@ def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     task = Task(
         id=1,
         text="sort photos",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=created,
         status=STATUS_PENDING,

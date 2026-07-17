@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from jolt import llm
-from jolt.models import DailyFocus, PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_PENDING, Task
+from jolt.models import DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING, Task
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -60,7 +60,7 @@ def _task(id=1):
     return Task(
         id=id,
         text="taxes",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status=STATUS_PENDING,
@@ -75,7 +75,7 @@ def _ordered_task(id, day):
     return Task(
         id=id,
         text=f"task {id}",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, day, tzinfo=TZ),
         status=STATUS_PENDING,
@@ -160,7 +160,7 @@ def test_prompt_drops_snapshot_task_that_is_no_longer_pending():
     done = Task(
         id=45,
         text="task 45",
-        priority=PRIORITY_NORMAL,
+        priority=0,
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status="done",
@@ -397,12 +397,28 @@ def _important_task(id=1):
     return Task(
         id=id,
         text="file the tax return",
-        priority=PRIORITY_IMPORTANT,
+        priority=4,
         deadline=None,
         created_at=datetime(2026, 7, 3, tzinfo=TZ),
         status=STATUS_PENDING,
         last_nagged_at=None,
         completed_at=None,
+    )
+
+
+def _high_task(id=1, estimate_seconds=None, details="", project_name=""):
+    return Task(
+        id=id,
+        text="file the tax return",
+        priority=4,
+        deadline=None,
+        created_at=datetime(2026, 7, 3, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+        estimate_seconds=estimate_seconds,
+        details=details,
+        project_name=project_name,
     )
 
 
@@ -612,3 +628,89 @@ def test_resolve_positions_ignores_stray_task_id_on_add():
     assert resolved[0].action == "add"
     assert resolved[0].text == "buy olive oil"
     assert resolved[0].task_id is None
+
+
+def test_format_duration_reads_common_estimates():
+    assert llm._format_duration(None) is None
+    assert llm._format_duration(900) == "15 min"
+    assert llm._format_duration(3600) == "1h"
+    assert llm._format_duration(7200) == "2h"
+
+
+def test_format_duration_sub_minute_estimates():
+    assert llm._format_duration(30) == "<1 min"
+    assert llm._format_duration(59) == "<1 min"
+    assert llm._format_duration(60) == "1 min"
+
+
+def test_write_nag_long_high_task_pushes_a_first_step():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_high_task(estimate_seconds=14400), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    user = str(client.messages.calls[0]["messages"]).lower()
+    assert "first" in system  # break it into a first slice
+    assert "4h" in user  # the estimate is surfaced
+
+
+def test_write_nag_short_high_task_says_knock_it_out():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_high_task(estimate_seconds=900), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
+    user = str(client.messages.calls[0]["messages"]).lower()
+    assert "15 min" in user
+
+
+def _mid_task(id=1):
+    return Task(
+        id=id,
+        text="reorganize the bookmarks",
+        priority=2,
+        deadline=None,
+        created_at=datetime(2026, 7, 3, tzinfo=TZ),
+        status=STATUS_PENDING,
+        last_nagged_at=None,
+        completed_at=None,
+    )
+
+
+def test_write_nag_mid_task_is_a_gentle_poke():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "gentle" in system or "no pressure" in system or "check in" in system
+
+
+def test_write_nag_mid_task_importance_is_medium_not_normal():
+    # A Mid-band task's Importance line must read "medium", not "normal": the wording
+    # must not contradict the gentle-poke guidance it also receives.
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
+    user = str(client.messages.calls[0]["messages"])
+    assert "Importance: medium." in user
+    assert "Importance: normal." not in user
+
+
+def test_write_nag_includes_description_and_project():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
+    llm.write_nag(
+        _high_task(details="the 2025 return on the tax-portal PDF", project_name="Backlog"),
+        datetime(2026, 7, 12, 13, tzinfo=TZ),
+        client,
+    )
+    payload = str(client.messages.calls[0]).lower()
+    assert "tax-portal" in payload
+    assert "backlog" in payload
+
+
+def test_write_focus_includes_duration_details_and_project():
+    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
+    focus = DailyFocus(
+        focus=_high_task(
+            estimate_seconds=7200, details="on the tax-portal PDF", project_name="Backlog"
+        ),
+        rescues=[],
+    )
+    llm.write_focus(focus, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
+    payload = str(client.messages.calls[0]).lower()
+    assert "2h" in payload
+    assert "tax-portal" in payload
+    assert "backlog" in payload

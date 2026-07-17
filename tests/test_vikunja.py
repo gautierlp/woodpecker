@@ -9,6 +9,36 @@ from jolt import vikunja
 from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING
 
 
+def test_parse_estimate_reads_the_mdone_sentinel():
+    assert vikunja.parse_estimate_seconds("<!-- mdone:estimate=3600 -->") == 3600
+    assert vikunja.parse_estimate_seconds("do X <!-- mdone:estimate=900 --> notes") == 900
+
+
+def test_parse_estimate_absent_or_malformed_is_none():
+    assert vikunja.parse_estimate_seconds("") is None
+    assert vikunja.parse_estimate_seconds(None) is None
+    assert vikunja.parse_estimate_seconds("plain notes, no estimate") is None
+    assert vikunja.parse_estimate_seconds("<!-- mdone:estimate=abc -->") is None
+
+
+def test_parse_estimate_tolerates_whitespace_in_sentinel():
+    assert vikunja.parse_estimate_seconds("<!--  mdone:estimate=120  -->") == 120
+
+
+def test_clean_description_strips_the_sentinel_and_trims():
+    assert vikunja.clean_description("<!-- mdone:estimate=3600 -->") == ""
+    assert (
+        vikunja.clean_description("call the accountant <!-- mdone:estimate=1800 -->")
+        == "call the accountant"
+    )
+    assert vikunja.clean_description(None) == ""
+
+
+def test_clean_description_leaves_a_malformed_sentinel_in_place():
+    # A non-numeric estimate is not a valid sentinel, so it is left as visible text.
+    assert vikunja.clean_description("<!-- mdone:estimate=abc -->") == "<!-- mdone:estimate=abc -->"
+
+
 def _raw(**over):
     base = {
         "id": 7,
@@ -28,7 +58,7 @@ def test_maps_basic_open_task():
     t = vikunja.vikunja_to_task(_raw())
     assert t.id == 7
     assert t.text == "Call the vet"
-    assert t.priority == PRIORITY_NORMAL
+    assert t.priority == 0
     assert t.status == STATUS_PENDING
     assert t.deadline is None
     assert t.position == 12
@@ -36,10 +66,25 @@ def test_maps_basic_open_task():
     assert t.completed_at is None
 
 
-def test_high_priority_maps_to_important():
-    assert vikunja.vikunja_to_task(_raw(priority=4)).priority == PRIORITY_IMPORTANT
-    assert vikunja.vikunja_to_task(_raw(priority=5)).priority == PRIORITY_IMPORTANT
-    assert vikunja.vikunja_to_task(_raw(priority=3)).priority == PRIORITY_NORMAL
+def test_priority_is_stored_raw():
+    assert vikunja.vikunja_to_task(_raw(priority=0)).priority == 0
+    assert vikunja.vikunja_to_task(_raw(priority=3)).priority == 3
+    assert vikunja.vikunja_to_task(_raw(priority=5)).priority == 5
+
+
+def test_maps_estimate_and_clean_description_and_project():
+    raw = _raw(description="file it <!-- mdone:estimate=1800 -->", project_id=2)
+    t = vikunja.vikunja_to_task(raw, project_name="Backlog")
+    assert t.estimate_seconds == 1800
+    assert t.details == "file it"
+    assert t.project_id == 2
+    assert t.project_name == "Backlog"
+
+
+def test_maps_missing_description_to_no_estimate_empty_details():
+    t = vikunja.vikunja_to_task(_raw())
+    assert t.estimate_seconds is None
+    assert t.details == ""
 
 
 def test_due_date_round_trips_to_local_date():
@@ -102,59 +147,93 @@ _GANTT_VIEW_ID = 10
 _LIST_VIEW_ID = 11
 
 
-def _views_handler_hit_counts():
-    """Returns (handler, hits) where hits tracks calls per endpoint kind."""
-    hits = {"views": 0, "list_view_tasks": 0, "plain_tasks": 0}
+def _multi_project_handler():
+    """Two projects: 2 'Backlog' (2 open tasks) and 3 'Personal' (1 open task)."""
+    projects = [
+        {"id": 2, "title": "Backlog", "is_archived": False},
+        {"id": 3, "title": "Personal", "is_archived": False},
+        {"id": -1, "title": "Favorites", "is_archived": False},  # pseudo-project, must be skipped
+        {"id": 9, "title": "Old", "is_archived": True},  # archived, must be skipped
+    ]
+    views = {2: 5, 3: 6, 9: 7}
+    tasks = {
+        2: [
+            {"id": 1, "title": "a", "priority": 0, "position": 1, "project_id": 2},
+            {"id": 2, "title": "b", "priority": 4, "position": 2, "project_id": 2},
+        ],
+        3: [{"id": 3, "title": "c", "priority": 0, "position": 1, "project_id": 3}],
+    }
 
     def handler(request):
         path = request.url.path
-        if path.endswith("/views"):
-            hits["views"] += 1
-            return httpx.Response(
-                200,
-                json=[
-                    {"id": _GANTT_VIEW_ID, "view_kind": "gantt"},
-                    {"id": _LIST_VIEW_ID, "view_kind": "list"},
-                ],
-            )
-        if f"/views/{_LIST_VIEW_ID}/tasks" in path:
-            hits["list_view_tasks"] += 1
+        if path.endswith("/api/v1/projects"):
             page = int(request.url.params.get("page", "1"))
-            if page > 1:
-                return httpx.Response(200, json=[])
-            return httpx.Response(
-                200,
-                json=[
-                    {"id": 1, "title": "a", "priority": 0, "position": 2},
-                    {"id": 2, "title": "b", "priority": 4, "position": 1},
-                ],
-            )
-        if path.endswith("/tasks"):
-            hits["plain_tasks"] += 1
-            return httpx.Response(200, json=[])
+            return httpx.Response(200, json=[] if page > 1 else projects)
+        for pid, vid in views.items():
+            if path.endswith(f"/projects/{pid}/views"):
+                return httpx.Response(200, json=[{"id": vid, "view_kind": "list"}])
+            if f"/views/{vid}/tasks" in path:
+                page = int(request.url.params.get("page", "1"))
+                return httpx.Response(200, json=[] if page > 1 else tasks.get(pid, []))
         raise AssertionError(f"unexpected path {path}")
 
-    return handler, hits
+    return handler
 
 
-def test_list_open_maps_all_returned_tasks():
-    handler, hits = _views_handler_hit_counts()
-    c = _client(handler)
+def test_list_open_merges_tasks_across_projects_and_tags_project_name():
+    c = _client(_multi_project_handler())
     tasks = c.list_open()
-    assert [t.id for t in tasks] == [1, 2]
-    assert tasks[1].priority == PRIORITY_IMPORTANT
-    assert hits["list_view_tasks"] > 0
-    assert hits["plain_tasks"] == 0
-    assert hits["views"] == 1
+    assert sorted(t.id for t in tasks) == [1, 2, 3]
+    by_id = {t.id: t for t in tasks}
+    assert by_id[1].project_name == "Backlog"
+    assert by_id[3].project_name == "Personal"
 
 
-def test_list_open_discovers_view_once_and_caches_it():
-    handler, hits = _views_handler_hit_counts()
-    c = _client(handler)
-    c.list_open()
-    c.list_open()
-    assert hits["views"] == 1
-    assert hits["list_view_tasks"] >= 2
+def test_list_open_skips_archived_and_pseudo_projects():
+    c = _client(_multi_project_handler())
+    # If a -1 or archived project were read, the handler would 404/AssertionError on its view.
+    tasks = c.list_open()
+    assert all(t.project_id in (2, 3) for t in tasks)
+
+
+def test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others():
+    # Project 2's list view is missing (404), which makes its read fail. Project 3's
+    # read must still succeed and its tasks must still come back; the failure must not
+    # raise out of list_open.
+    projects = [
+        {"id": 2, "title": "Broken", "is_archived": False},
+        {"id": 3, "title": "Personal", "is_archived": False},
+    ]
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else projects)
+        if path.endswith("/projects/2/views"):
+            return httpx.Response(404, json={"message": "not found"})
+        if path.endswith("/projects/3/views"):
+            return httpx.Response(200, json=[{"id": 6, "view_kind": "list"}])
+        if "/views/6/tasks" in path:
+            page = int(request.url.params.get("page", "1"))
+            tasks = [{"id": 3, "title": "c", "priority": 0, "position": 1, "project_id": 3}]
+            return httpx.Response(200, json=[] if page > 1 else tasks)
+        raise AssertionError(f"unexpected path {path}")
+
+    tasks = _client(handler).list_open()
+    assert [t.id for t in tasks] == [3]
+
+
+def test_list_open_tolerates_a_project_with_no_open_tasks():
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            return httpx.Response(200, json=[{"id": 2, "title": "Backlog", "is_archived": False}])
+        if path.endswith("/projects/2/views"):
+            return httpx.Response(200, json=[{"id": 5, "view_kind": "list"}])
+        return httpx.Response(200, json=[])  # empty first page
+
+    assert _client(handler).list_open() == []
 
 
 def test_get_task_returns_none_on_404():
@@ -211,7 +290,12 @@ def test_delete_task_true_on_success_false_on_404():
     assert _client(lambda r: httpx.Response(404, json={})).delete_task(5) is False
 
 
+_SINGLE_PROJECT = [{"id": 3, "title": "P", "is_archived": False}]
+
+
 def test_server_error_raises():
+    # An error enumerating projects at all (not a single project's read) is a total
+    # failure: list_open must still raise rather than silently return an empty list.
     c = _client(lambda r: httpx.Response(500, json={"message": "boom"}))
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
@@ -227,6 +311,9 @@ def test_list_open_paginates_past_a_server_enforced_page_cap():
 
     def handler(request):
         path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else _SINGLE_PROJECT)
         if path.endswith("/views"):
             return httpx.Response(200, json=[{"id": _LIST_VIEW_ID, "view_kind": "list"}])
         page = int(request.url.params.get("page", "1"))
@@ -244,6 +331,9 @@ def test_list_open_paginates_past_a_server_enforced_page_cap():
 def test_list_open_falls_back_to_first_view_when_no_list_kind():
     def handler(request):
         path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(200, json=[] if page > 1 else _SINGLE_PROJECT)
         if path.endswith("/views"):
             return httpx.Response(200, json=[{"id": _GANTT_VIEW_ID, "view_kind": "gantt"}])
         assert f"/views/{_GANTT_VIEW_ID}/tasks" in path
@@ -257,16 +347,89 @@ def test_list_open_falls_back_to_first_view_when_no_list_kind():
     assert [t.id for t in tasks] == [1]
 
 
-def test_list_open_raises_when_views_empty():
+def test_list_projects_paginates_across_pages():
+    # Page 1 is a full page of projects, page 2 has more, page 3 is empty. All of
+    # them must be enumerated (and therefore have their tasks read by list_open).
+    page_size = vikunja._LIST_OPEN_PAGE_SIZE
+    projects_page_1 = [
+        {"id": i, "title": f"p{i}", "is_archived": False} for i in range(1, page_size + 1)
+    ]
+    projects_page_2 = [{"id": page_size + 1, "title": "last", "is_archived": False}]
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            if page == 1:
+                return httpx.Response(200, json=projects_page_1)
+            if page == 2:
+                return httpx.Response(200, json=projects_page_2)
+            return httpx.Response(200, json=[])
+        if path.endswith("/views"):
+            return httpx.Response(200, json=[{"id": 5, "view_kind": "list"}])
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
+        project_id = int(path.split("/projects/")[1].split("/")[0])
+        return httpx.Response(
+            200,
+            json=[{"id": project_id, "title": "t", "priority": 0, "position": 1}],
+        )
+
+    c = _client(handler)
+    tasks = c.list_open()
+    assert sorted(t.id for t in tasks) == list(range(1, page_size + 2))
+
+
+def test_list_open_still_reads_the_write_project_when_not_enumerated():
+    # The client's write-target project id is 3 (see _client). If /api/v1/projects
+    # doesn't include it (e.g. it got archived), list_open must still read it
+    # directly so tasks Jolt itself created there never silently vanish.
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/api/v1/projects"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(
+                200, json=[] if page > 1 else [{"id": 2, "title": "Backlog", "is_archived": False}]
+            )
+        if path.endswith("/projects/2/views"):
+            return httpx.Response(200, json=[{"id": 5, "view_kind": "list"}])
+        if path.endswith("/projects/3/views"):
+            return httpx.Response(200, json=[{"id": 6, "view_kind": "list"}])
+        page = int(request.url.params.get("page", "1"))
+        if page > 1:
+            return httpx.Response(200, json=[])
+        if "/views/5/tasks" in path:
+            return httpx.Response(
+                200, json=[{"id": 1, "title": "a", "priority": 0, "position": 1, "project_id": 2}]
+            )
+        if "/views/6/tasks" in path:
+            return httpx.Response(
+                200, json=[{"id": 3, "title": "c", "priority": 0, "position": 1, "project_id": 3}]
+            )
+        raise AssertionError(f"unexpected path {path}")
+
+    tasks = _client(handler).list_open()
+    assert 3 in [t.id for t in tasks]
+
+
+def test_list_view_id_raises_when_views_empty():
+    # A project with no views at all is still a hard failure of _list_view_id itself;
+    # list_open just no longer lets one project's failure raise past the loop (see
+    # test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others).
     c = _client(lambda r: httpx.Response(200, json=[]))
     with pytest.raises(vikunja.VikunjaError):
-        c.list_open()
+        c._list_view_id(3)
 
 
 def test_list_open_raises_on_404():
-    # A 404 here means a misconfigured VIKUNJA_PROJECT_ID, not an empty backlog:
-    # it must raise rather than silently return an empty list.
-    c = _client(lambda r: httpx.Response(404, json={"message": "project not found"}))
+    # A 404 enumerating projects at all (not a single project's read) means a
+    # misconfigured Vikunja URL or token: it must raise rather than silently return an
+    # empty list.
+    def handler(request):
+        return httpx.Response(404, json={"message": "not found"})
+
+    c = _client(handler)
     with pytest.raises(vikunja.VikunjaError):
         c.list_open()
 
