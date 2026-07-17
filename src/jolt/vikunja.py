@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -40,6 +41,25 @@ def _due_for(deadline: date | None) -> str | None:
         return None
     end_of_day = datetime.combine(deadline, time(23, 59, 59), tzinfo=_PARIS)
     return end_of_day.astimezone(_UTC).isoformat().replace("+00:00", "Z")
+
+
+# mdone (the task app) has no native duration field, so it stores an estimate as an HTML
+# comment inside the Vikunja description: "<!-- mdone:estimate=SECONDS -->". We parse the
+# seconds out and strip the comment so the visible description is clean text.
+_ESTIMATE_RE = re.compile(r"<!--\s*mdone:estimate=(\d+)\s*-->")
+
+
+def parse_estimate_seconds(description: str | None) -> int | None:
+    if not description:
+        return None
+    match = _ESTIMATE_RE.search(description)
+    return int(match.group(1)) if match else None
+
+
+def clean_description(description: str | None) -> str:
+    if not description:
+        return ""
+    return _ESTIMATE_RE.sub("", description).strip()
 
 
 def vikunja_to_task(raw: dict) -> Task:

@@ -9,6 +9,33 @@ from jolt import vikunja
 from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING
 
 
+def test_parse_estimate_reads_the_mdone_sentinel():
+    assert vikunja.parse_estimate_seconds("<!-- mdone:estimate=3600 -->") == 3600
+    assert vikunja.parse_estimate_seconds("do X <!-- mdone:estimate=900 --> notes") == 900
+
+
+def test_parse_estimate_absent_or_malformed_is_none():
+    assert vikunja.parse_estimate_seconds("") is None
+    assert vikunja.parse_estimate_seconds(None) is None
+    assert vikunja.parse_estimate_seconds("plain notes, no estimate") is None
+    assert vikunja.parse_estimate_seconds("<!-- mdone:estimate=abc -->") is None
+
+
+def test_parse_estimate_tolerates_whitespace_in_sentinel():
+    assert vikunja.parse_estimate_seconds("<!--  mdone:estimate=120  -->") == 120
+
+
+def test_clean_description_strips_the_sentinel_and_trims():
+    assert vikunja.clean_description("<!-- mdone:estimate=3600 -->") == ""
+    assert vikunja.clean_description("call the accountant <!-- mdone:estimate=1800 -->") == "call the accountant"
+    assert vikunja.clean_description(None) == ""
+
+
+def test_clean_description_leaves_a_malformed_sentinel_in_place():
+    # A non-numeric estimate is not a valid sentinel, so it is left as visible text.
+    assert vikunja.clean_description("<!-- mdone:estimate=abc -->") == "<!-- mdone:estimate=abc -->"
+
+
 def _raw(**over):
     base = {
         "id": 7,
