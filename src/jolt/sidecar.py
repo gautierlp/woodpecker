@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 
 _NAG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS nag_state (
@@ -15,6 +15,14 @@ CREATE TABLE IF NOT EXISTS display_snapshot (
 );
 """
 
+_BUMP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bump_state (
+    task_id INTEGER PRIMARY KEY,
+    last_due_date TEXT,
+    bump_count INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
@@ -25,6 +33,7 @@ def connect(path: str) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(_NAG_SCHEMA)
     conn.execute(_DISPLAY_SCHEMA)
+    conn.execute(_BUMP_SCHEMA)
     conn.commit()
 
 
@@ -61,9 +70,48 @@ def load_display(conn: sqlite3.Connection, chat_id: int) -> list[int] | None:
     return [int(part) for part in raw.split(",")] if raw else []
 
 
+def bump_counts(conn: sqlite3.Connection) -> dict[int, int]:
+    rows = conn.execute("SELECT task_id, bump_count FROM bump_state").fetchall()
+    return {row["task_id"]: row["bump_count"] for row in rows}
+
+
+def apply_due_snapshot(conn: sqlite3.Connection, due_by_task: dict[int, date | None]) -> None:
+    """Record each task's current due date and count forward moves. A still-tracked task
+    whose due date moved forward since last seen gets bump_count incremented. Pulling the
+    date in or an unchanged date updates the stored date without a bump. Tasks with no due
+    date are not tracked, so a date appearing later starts a fresh count at 0."""
+    stored = {
+        row["task_id"]: row["last_due_date"]
+        for row in conn.execute("SELECT task_id, last_due_date FROM bump_state")
+    }
+    for task_id, due in due_by_task.items():
+        if due is None:
+            continue
+        due_str = due.isoformat()
+        prev = stored.get(task_id)
+        if task_id not in stored:
+            conn.execute(
+                "INSERT INTO bump_state (task_id, last_due_date, bump_count) VALUES (?, ?, 0)",
+                (task_id, due_str),
+            )
+        elif prev is not None and due_str > prev:
+            conn.execute(
+                "UPDATE bump_state SET last_due_date = ?, bump_count = bump_count + 1 "
+                "WHERE task_id = ?",
+                (due_str, task_id),
+            )
+        elif prev != due_str:
+            conn.execute(
+                "UPDATE bump_state SET last_due_date = ? WHERE task_id = ?",
+                (due_str, task_id),
+            )
+    conn.commit()
+
+
 def prune(conn: sqlite3.Connection, live_ids: set[int]) -> None:
-    ids = {int(r["task_id"]) for r in conn.execute("SELECT task_id FROM nag_state")}
-    stale = ids - live_ids
-    if stale:
-        conn.executemany("DELETE FROM nag_state WHERE task_id = ?", [(i,) for i in stale])
-        conn.commit()
+    for table in ("nag_state", "bump_state"):
+        ids = {int(r["task_id"]) for r in conn.execute(f"SELECT task_id FROM {table}")}
+        stale = ids - live_ids
+        if stale:
+            conn.executemany(f"DELETE FROM {table} WHERE task_id = ?", [(i,) for i in stale])
+    conn.commit()
