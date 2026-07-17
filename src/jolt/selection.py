@@ -71,6 +71,29 @@ def select_daily_focus(tasks: list[Task], now: datetime) -> DailyFocus:
     return DailyFocus(focus=focus, rescues=rescues)
 
 
+def select_frog(tasks: list[Task], now: datetime) -> Task | None:
+    """The single most-avoided important task: the lead of the day. Eligible = pending,
+    priority >= MATTERS_MIN_PRIORITY, has a due date. Picks the highest bump_count, ties
+    broken by higher priority then oldest. If nothing has been bumped yet (day one), falls
+    back to the highest-priority eligible task due today or overdue, then oldest."""
+    today = now.date()
+    eligible = [
+        t
+        for t in tasks
+        if t.status == STATUS_PENDING
+        and t.priority >= config.MATTERS_MIN_PRIORITY
+        and t.deadline is not None
+    ]
+    if not eligible:
+        return None
+    bumped = [t for t in eligible if t.bump_count > 0]
+    if bumped:
+        return max(bumped, key=lambda t: (t.bump_count, t.priority, -t.created_at.timestamp()))
+    due_now = [t for t in eligible if t.deadline <= today]
+    pool = due_now or eligible
+    return max(pool, key=lambda t: (t.priority, -t.created_at.timestamp()))
+
+
 def is_quiet_hours(
     now: datetime,
     start_hour: int = config.QUIET_START_HOUR,

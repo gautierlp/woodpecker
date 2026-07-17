@@ -234,3 +234,36 @@ def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
         completed_at=None,
     )
     assert selection.select_slow_resurface([task], now) is task
+
+
+def test_select_frog_picks_highest_bump_count():
+    a = replace(make(1, priority=3, created=NOW - timedelta(days=2)), bump_count=1)
+    b = replace(make(2, priority=3, created=NOW - timedelta(days=2)), bump_count=4)
+    a = replace(a, deadline=NOW.date())
+    b = replace(b, deadline=NOW.date())
+    assert selection.select_frog([a, b], NOW).id == 2
+
+
+def test_select_frog_tie_on_bumps_breaks_by_priority_then_age():
+    older_low = replace(make(1, priority=2, created=NOW - timedelta(days=9)), bump_count=3)
+    newer_high = replace(make(2, priority=4, created=NOW - timedelta(days=1)), bump_count=3)
+    older_low = replace(older_low, deadline=NOW.date())
+    newer_high = replace(newer_high, deadline=NOW.date())
+    assert selection.select_frog([older_low, newer_high], NOW).id == 2
+
+
+def test_select_frog_day_one_fallback_to_top_priority_due_now():
+    # No bumps yet: fall back to the highest-priority eligible task due today/overdue.
+    high_due = replace(make(1, priority=4), deadline=NOW.date())
+    mid_due = replace(make(2, priority=2), deadline=NOW.date())
+    assert selection.select_frog([high_due, mid_due], NOW).id == 1
+
+
+def test_select_frog_excludes_low_priority_and_undated():
+    low = replace(make(1, priority=1), deadline=NOW.date())  # below the cutoff
+    undated_high = make(2, priority=4)  # eligible priority but no due date
+    assert selection.select_frog([low, undated_high], NOW) is None
+
+
+def test_select_frog_none_when_no_eligible_tasks():
+    assert selection.select_frog([make(1, priority=0)], NOW) is None

@@ -11,6 +11,9 @@ NAG_HOURS = (9, 13, 19)
 # gentle poke, Low/unset gets nudged toward dropping. See selection.priority_band.
 PRIORITY_HIGH_MIN = 3  # priority >= 3 -> high band
 PRIORITY_MID_MIN = 1  # priority 1-2 -> mid band; 0 -> low band
+# The morning message and the frog only consider tasks at or above this raw priority
+# (2 = Medium and up: Medium, High, Urgent, Critical). Low (1) and unset (0) are excluded.
+MATTERS_MIN_PRIORITY = 2
 LONG_DURATION_SECONDS = (
     3600  # nags treat an estimate >= this as "long" (block time, not "just do it")
 )
