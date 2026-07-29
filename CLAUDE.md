@@ -102,9 +102,16 @@ and `display_snapshot` (one row per chat: the ordered task ids of the last list
 shown). `store.py` is the only module the rest of Jolt (`orchestrator.py`,
 `scheduler.py`) talks to; it returns and accepts the `Task` dataclass so the rest of
 the app is unaware Vikunja exists. The `Task` dataclass no longer has a `blocked_by`
-field, and the intent set is `add` / `complete` / `drop` / `list` / `answer` (the
-earlier `edit`, `block`, and `merge` intents were removed since editing and
-blocker-tracking now live in Vikunja itself).
+field, and the intent set is `add` / `complete` / `drop` / `reschedule` / `list` /
+`answer` (the earlier `edit`, `block`, and `merge` intents were removed since
+rewording and blocker-tracking now live in Vikunja itself).
+
+`reschedule` moves an existing task's due date or raises its priority in place. It
+must never be expressed as an `add`: the sidecar's `bump_state` counts forward
+due-date moves per `task_id`, so re-adding a task under a fresh id resets
+`bump_count`, the avoidance signal the nagging is built on. Dropping the intent
+during the Vikunja cutover caused exactly that: "push 2 to tomorrow" was recorded
+as an `add`, silently duplicating the task and zeroing its history.
 
 ## Development
 

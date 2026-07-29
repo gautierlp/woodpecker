@@ -47,6 +47,18 @@ class Store:
             return None
         return self._vk.mark_done(task_id)
 
+    def reschedule_task(
+        self, task_id: int, deadline: date | None, priority: str | None
+    ) -> Task | None:
+        """Move an existing task's due date and/or priority. Deliberately an update, not an
+        add: the bump counter in the sidecar keys off task_id, so re-adding the task under a
+        new id would reset the avoidance signal that Jolt nags on. The bump itself is counted
+        by apply_due_snapshot on the next list_pending, which diffs the stored due date."""
+        task = self._vk.get_task(task_id)
+        if task is None or task.status == STATUS_DONE:
+            return None
+        return self._vk.update_task(task_id, deadline=deadline, priority=priority)
+
     def drop_task(self, task_id: int) -> bool:
         task = self._vk.get_task(task_id)
         if task is None or task.status == STATUS_DONE:

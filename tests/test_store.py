@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from jolt import sidecar, store
-from jolt.models import PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
+from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
 
 
 class FakeVikunja:
@@ -46,6 +46,19 @@ class FakeVikunja:
             self.deleted.append(task_id)
             return True
         return False
+
+    def update_task(self, task_id, deadline=None, priority=None):
+        t = self._tasks.get(task_id)
+        if t is None:
+            return None
+        over = {}
+        if deadline is not None:
+            over["deadline"] = deadline
+        if priority is not None:
+            over["priority"] = priority
+        updated = Task(**{**t.__dict__, **over})
+        self._tasks[task_id] = updated
+        return updated
 
 
 def _task(id, **over):
@@ -138,3 +151,49 @@ def test_list_pending_injects_bump_count_after_a_forward_move():
     vk.set_open([_task(1, deadline=date(2026, 7, 19))])
     second = s.list_pending()
     assert second[0].bump_count == 1
+
+
+def test_reschedule_task_moves_the_due_date_on_the_existing_task():
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 29))])
+    s, _ = _store(vk)
+    updated = s.reschedule_task(1, deadline=date(2026, 7, 30), priority=None)
+    assert updated is not None
+    assert updated.id == 1
+    assert updated.deadline == date(2026, 7, 30)
+    # No new task was invented: the backlog still holds exactly the one task.
+    assert [t.id for t in s.list_pending()] == [1]
+
+
+def test_reschedule_task_sets_priority():
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 29))])
+    s, _ = _store(vk)
+    updated = s.reschedule_task(1, deadline=None, priority=PRIORITY_IMPORTANT)
+    assert updated.priority == PRIORITY_IMPORTANT
+    assert updated.deadline == date(2026, 7, 29)
+
+
+def test_reschedule_task_returns_none_for_missing_or_done_task():
+    vk = FakeVikunja([_task(1)], done_tasks=[_task(2, status=STATUS_DONE)])
+    s, _ = _store(vk)
+    assert s.reschedule_task(404, deadline=date(2026, 7, 30), priority=None) is None
+    assert s.reschedule_task(2, deadline=date(2026, 7, 30), priority=None) is None
+
+
+def test_pushing_a_due_date_forward_counts_a_bump():
+    """The point of rescheduling in place rather than re-adding: the sidecar sees the same
+    task_id move forward and increments the avoidance signal."""
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 29))])
+    s, _ = _store(vk)
+    assert s.list_pending()[0].bump_count == 0
+    s.reschedule_task(1, deadline=date(2026, 7, 30), priority=None)
+    assert s.list_pending()[0].bump_count == 1
+    s.reschedule_task(1, deadline=date(2026, 7, 31), priority=None)
+    assert s.list_pending()[0].bump_count == 2
+
+
+def test_pulling_a_due_date_earlier_does_not_count_a_bump():
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 29))])
+    s, _ = _store(vk)
+    assert s.list_pending()[0].bump_count == 0
+    s.reschedule_task(1, deadline=date(2026, 7, 28), priority=None)
+    assert s.list_pending()[0].bump_count == 0

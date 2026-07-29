@@ -3,7 +3,13 @@ from zoneinfo import ZoneInfo
 
 from jolt import orchestrator
 from jolt.llm import Intent
-from jolt.models import STATUS_DONE, STATUS_DROPPED, STATUS_PENDING, Task
+from jolt.models import (
+    PRIORITY_NORMAL,
+    STATUS_DONE,
+    STATUS_DROPPED,
+    STATUS_PENDING,
+    Task,
+)
 
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 12, 8, tzinfo=TZ)
@@ -52,6 +58,19 @@ class FakeStore:
             return False
         self._tasks[task_id] = Task(**{**task.__dict__, "status": STATUS_DROPPED})
         return True
+
+    def reschedule_task(self, task_id, deadline, priority):
+        task = self._tasks.get(task_id)
+        if task is None or task.status != STATUS_PENDING:
+            return None
+        over = {}
+        if deadline is not None:
+            over["deadline"] = deadline
+        if priority is not None:
+            over["priority"] = priority
+        updated = Task(**{**task.__dict__, **over})
+        self._tasks[task_id] = updated
+        return updated
 
 
 def fresh():
@@ -110,3 +129,44 @@ def test_answer_intent_passes_reply_through():
         store, Intent(action="answer", reply="Do the taxes first."), NOW
     )
     assert reply == "Do the taxes first."
+
+
+def test_reschedule_moves_the_existing_task_instead_of_adding_a_copy():
+    store = fresh()
+    store.add_task("Pick up the costume", PRIORITY_NORMAL, date(2026, 7, 29), NOW)
+    reply = orchestrator.apply_intent(
+        store,
+        Intent(action="reschedule", task_id=1, deadline=date(2026, 7, 30)),
+        NOW,
+    )
+    assert "2026-07-30" in reply
+    tasks = store.list_pending()
+    # The regression this guards: a reschedule used to fall through to `add`, leaving two
+    # copies of the same task in the backlog.
+    assert len(tasks) == 1
+    assert tasks[0].id == 1
+    assert tasks[0].deadline == date(2026, 7, 30)
+
+
+def test_reschedule_can_raise_priority_without_a_new_deadline():
+    store = fresh()
+    store.add_task("Ranger bureau", PRIORITY_NORMAL, date(2026, 7, 29), NOW)
+    reply = orchestrator.apply_intent(
+        store,
+        Intent(action="reschedule", task_id=1, priority="important"),
+        NOW,
+    )
+    tasks = store.list_pending()
+    assert len(tasks) == 1
+    assert tasks[0].priority == "important"
+    assert tasks[0].deadline == date(2026, 7, 29)
+    assert reply
+
+
+def test_reschedule_of_unknown_task_reports_not_found():
+    store = fresh()
+    reply = orchestrator.apply_intent(
+        store, Intent(action="reschedule", task_id=404, deadline=date(2026, 7, 30)), NOW
+    )
+    assert "find" in reply.lower()
+    assert store.list_pending() == []

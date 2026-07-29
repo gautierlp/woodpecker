@@ -701,3 +701,33 @@ def test_write_focus_includes_duration_details_and_project():
     assert "2h" in payload
     assert "tax-portal" in payload
     assert "backlog" in payload
+
+
+def test_reschedule_is_an_available_action():
+    # The gap this closes: with no reschedule action, "push 2 to tomorrow" was recorded as
+    # an add, so Vikunja gained a duplicate task and the bump counter never saw the move.
+    assert "reschedule" in llm._TOOL["input_schema"]["properties"]["action"]["enum"]
+
+
+def test_reschedule_position_resolves_to_its_id():
+    tasks = [_task(id=10), _task(id=20)]
+    display_ids = [10, 20]
+    intent = llm.Intent(action="reschedule", task_id=2, deadline=date(2026, 7, 30))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
+    assert resolved[0].action == "reschedule"
+    assert resolved[0].task_id == 20
+    assert resolved[0].deadline == date(2026, 7, 30)
+
+
+def test_reschedule_out_of_range_position_becomes_a_clarification():
+    tasks = [_task(id=10)]
+    display_ids = [10]
+    intent = llm.Intent(action="reschedule", task_id=45, deadline=date(2026, 7, 30))
+    resolved = llm._resolve_positions(
+        [intent], display_ids, tasks, datetime(2026, 7, 13, tzinfo=TZ)
+    )
+    assert resolved[0].action == "answer"
+    assert "45" in resolved[0].reply
+    assert resolved[0].task_id is None

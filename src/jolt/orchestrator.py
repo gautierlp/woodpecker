@@ -22,6 +22,13 @@ def apply_intent(store, intent: Intent, now: datetime) -> str:
     if intent.action == "drop":
         ok = store.drop_task(intent.task_id)
         return "Dropped." if ok else "Couldn't find that one."
+    if intent.action == "reschedule":
+        task = store.reschedule_task(intent.task_id, intent.deadline, intent.priority)
+        if task is None:
+            return "Couldn't find that one."
+        if intent.deadline:
+            return f'Moved. "{task.text}" now due {task.deadline.isoformat()}.'
+        return f'Bumped up. "{task.text}" is marked important.'
     if intent.action == "list":
         return render_backlog(store.list_pending(), now)
     return intent.reply or "Not sure what you mean. Try rephrasing?"

@@ -446,3 +446,61 @@ def test_transport_error_surfaces_as_vikunja_error():
         c.list_open()
     with pytest.raises(vikunja.VikunjaError):
         c.get_task(1)
+
+
+def _update_handler(seen, existing):
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=existing)
+        seen["post_body"] = json.loads(request.content)
+        seen["post_url"] = str(request.url)
+        return httpx.Response(200, json={**existing, **seen["post_body"]})
+
+    return handler
+
+
+def test_update_task_moves_the_due_date_in_place():
+    seen = {}
+    existing = {
+        "id": 5,
+        "title": "Pick up the costume",
+        "priority": 0,
+        "due_date": "2026-07-29T21:59:59Z",
+        "done": False,
+    }
+    task = _client(_update_handler(seen, existing)).update_task(5, deadline=date(2026, 7, 30))
+    assert "/api/v1/tasks/5" in seen["post_url"]
+    # Read-modify-write: the title and other fields survive the update.
+    assert seen["post_body"]["title"] == "Pick up the costume"
+    assert seen["post_body"]["due_date"] == vikunja._due_for(date(2026, 7, 30))
+    assert task.deadline == date(2026, 7, 30)
+    assert task.id == 5
+
+
+def test_update_task_sets_priority_without_touching_the_due_date():
+    seen = {}
+    existing = {
+        "id": 5,
+        "title": "Ranger bureau",
+        "priority": 0,
+        "due_date": "2026-07-29T21:59:59Z",
+        "done": False,
+    }
+    task = _client(_update_handler(seen, existing)).update_task(5, priority=PRIORITY_IMPORTANT)
+    assert seen["post_body"]["priority"] == vikunja.PRIORITY_IMPORTANT_VALUE
+    # deadline was not passed, so the stored due date is round-tripped untouched.
+    assert seen["post_body"]["due_date"] == "2026-07-29T21:59:59Z"
+    assert task.deadline == date(2026, 7, 29)
+
+
+def test_update_task_with_nothing_to_change_leaves_the_task_alone():
+    seen = {}
+    existing = {"id": 5, "title": "Repair bike", "priority": 0, "due_date": None, "done": False}
+    task = _client(_update_handler(seen, existing)).update_task(5)
+    assert seen["post_body"]["title"] == "Repair bike"
+    assert task.text == "Repair bike"
+
+
+def test_update_task_returns_none_when_task_missing():
+    c = _client(lambda r: httpx.Response(404, json={"message": "not found"}))
+    assert c.update_task(5, deadline=date(2026, 7, 30)) is None

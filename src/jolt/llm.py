@@ -82,9 +82,9 @@ def parse_intent(tool_input: dict) -> Intent:
 
 
 # strict=False on purpose. Strict tool use constrains generation to the schema grammar,
-# and in practice that made the model stop populating optional fields on an edit: it would
-# emit {"action": "edit", "task_id": N} and silently drop the new deadline or reworded text
-# into "reply" or nowhere, so deadline changes and partial-completion rewrites were lost.
+# and in practice that made the model stop populating optional fields on a reschedule: it
+# would emit {"action": "reschedule", "task_id": N} and silently drop the new deadline into
+# "reply" or nowhere, so the deadline change was lost.
 # Both Haiku and Sonnet failed the same way under strict and both work with it off, so this
 # is the schema, not the model. We do not need the grammar guarantee: parse_intent already
 # survives a malformed block and _resolve_positions handles out-of-range numbers.
@@ -98,8 +98,9 @@ _TOOL = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "complete", "drop", "list", "answer"],
-                "description": "add a task, complete/drop an existing one, list the backlog, "
+                "enum": ["add", "complete", "drop", "reschedule", "list", "answer"],
+                "description": "add a task, complete/drop an existing one, reschedule an "
+                "existing one (move its due date or make it important), list the backlog, "
                 "or answer a question / reply to the user.",
             },
             "text": {
@@ -110,18 +111,20 @@ _TOOL = {
             "priority": {
                 "type": "string",
                 "enum": ["normal", "important"],
-                "description": "For action=add: always judge this from the wording and stakes, never leave it blank. 'important' for anything with real consequences (a deadline, money, health, admin/legal weight); 'normal' otherwise.",
+                "description": "For action=add: always judge this from the wording and stakes, never leave it blank. 'important' for anything with real consequences (a deadline, money, health, admin/legal weight); 'normal' otherwise. For action=reschedule: set 'important' only when the user is raising the task's urgency.",
             },
             "deadline": {
                 "type": "string",
-                "description": "The task's due date as an ISO YYYY-MM-DD date, for action=add. "
+                "description": "The task's due date as an ISO YYYY-MM-DD date, for action=add "
+                "or action=reschedule. "
                 "Fill this whenever the user gives a deadline, including relative "
                 "ones (today, tomorrow, Wednesday, next week): resolve them to an ISO date. "
                 "Leave unset only when there is no deadline.",
             },
             "task_id": {
                 "type": "integer",
-                "description": "The backlog number shown for the existing task, for complete/drop.",
+                "description": "The backlog number shown for the existing task, for "
+                "complete/drop/reschedule.",
             },
             "reply": {
                 "type": "string",
@@ -174,6 +177,7 @@ def _task_lines(display_ids: list[int] | None, tasks: list[Task], now: datetime)
 _ID_FIELDS = {
     "complete": ("task_id",),
     "drop": ("task_id",),
+    "reschedule": ("task_id",),
 }
 _ALL_ID_FIELDS = ("task_id",)
 
@@ -238,8 +242,16 @@ def interpret_message(
         "importance from the wording and stakes and set priority (normal / important); do not "
         "leave it blank, since the backlog is ranked by importance. In the backlog below each "
         "task is listed as 'number: text', where the number is what the user sees. To act on a "
-        "task (complete, drop), pass that exact number as task_id: the user's '2' in "
-        "'complete 2' is that number. These numbers are only valid for the backlog shown right "
+        "task (complete, drop, reschedule), pass that exact number as task_id: the user's '2' in "
+        "'complete 2' is that number. "
+        "When the user gives a new date or a new urgency for a task that is ALREADY in the "
+        "backlog, that is action=reschedule, never action=add. Shorthand like '2 -> tomorrow', "
+        "'3 to friday', 'push 4 to next week', 'move this to monday' or '5 -> urgent' means "
+        "reschedule the task at that number: put the resolved date in deadline, or set "
+        "priority=important when the user is raising urgency rather than naming a date. "
+        "Only use action=add when the task is not in the backlog yet. Adding a second copy of a "
+        "task that is already listed is always wrong. "
+        "These numbers are only valid for the backlog shown right "
         "now: the list is renumbered whenever a task is completed or added, so a number that "
         "appeared in an earlier turn of this conversation may now point to a different task. "
         "Never reinterpret or quote a number from an earlier turn against the current backlog; "
