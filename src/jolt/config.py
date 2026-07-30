@@ -58,7 +58,10 @@ def vikunja_project_id() -> int:
 
 
 def sidecar_path() -> str:
-    return os.environ.get("JOLT_DB_PATH", "data/jolt.db")
+    # data/sidecar.db, not data/jolt.db: the latter is the pre-Vikunja database, still kept
+    # on the host as a rollback artifact, and its `tasks` table is not a sidecar schema.
+    # See docs/CUTOVER.md.
+    return os.environ.get("JOLT_DB_PATH", "data/sidecar.db")
 
 
 def log_level() -> str:

@@ -38,7 +38,10 @@ def test_sidecar_path_defaults_when_unset(monkeypatch):
     from jolt import config
 
     monkeypatch.delenv("JOLT_DB_PATH", raising=False)
-    assert config.sidecar_path() == "data/jolt.db"
+    # Deliberately not data/jolt.db: that name belongs to the pre-Vikunja database whose
+    # `tasks` table is not a sidecar schema (see docs/CUTOVER.md). Defaulting to it would
+    # point a fresh deploy with no JOLT_DB_PATH set at the wrong file.
+    assert config.sidecar_path() == "data/sidecar.db"
 
 
 def test_vikunja_url_reads_env(monkeypatch):
