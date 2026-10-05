@@ -1,5 +1,8 @@
 # Jolt
 
+**Context card:** `~/vault/20 Areas/homelab/_area.md` (status, goals, links). Read it first.
+Decisions with their reason and logs of what was done go to that vault folder (never run git there); code docs, specs and plans stay in this repo.
+
 Telegram bot (working name: **Jolt**) that fights task avoidance. Holds a personal backlog, nudges toward one
 focused thing each day, and gets pointedly insistent about tasks that have been quietly
 postponed. Plain-language interface powered by Claude.
