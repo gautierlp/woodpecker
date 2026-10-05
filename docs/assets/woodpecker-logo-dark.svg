@@ -32,9 +32,8 @@
     </g>
     <path d="M250 112 C262 96 278 88 294 88 M226 98 C246 72 274 62 298 62" fill="none" stroke-width="6"/>
   </g>
-  <!-- wood chips -->
+  <!-- ink spots -->
   <g fill="#fff">
-    <path d="M356 164 l16 -8 l-3 16 Z"/><path d="M372 138 l14 2 l-8 12 Z"/><path d="M350 132 l12 -4 l-2 13 Z"/>
     <circle cx="140" cy="120" r="3"/><circle cx="160" cy="98" r="2"/><circle cx="120" cy="440" r="3"/>
     <circle cx="96" cy="300" r="2.5"/><circle cx="210" cy="180" r="2"/><circle cx="180" cy="420" r="2"/>
   </g>
