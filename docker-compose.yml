@@ -1,9 +1,7 @@
 services:
-  # Still named jolt, the name from before the rename: the container on jarvis is jolt.
-  # A new name here makes the next deploy start a second bot next to the old one.
-  jolt:
+  woodpecker:
     build: .
-    container_name: jolt
+    container_name: woodpecker
     restart: unless-stopped
     env_file: .env
     environment:

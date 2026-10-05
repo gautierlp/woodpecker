@@ -13,10 +13,10 @@ Private single-user project, not a SaaS. Built to break a specific personal loop
 **Status: deployed and running, now backed by Vikunja.** The full app (bot, LLM,
 tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy workflow
 are in place, and the task store has been refactored onto Vikunja as the source of
-truth. Live on `jarvis` as the `jolt` container (bot `@jolt_todo_bot`), with the
-self-hosted runner `gh-runner-jolt` auto-deploying on push to `main`. Those three names,
-the checkout `/home/gautier/docker/jolt` and the compose service keep the old name for now:
-a new service name would make the next deploy start a second bot beside the old one. The sidecar
+truth. Live on `jarvis` as the `woodpecker` container, checked out at
+`/home/gautier/docker/woodpecker`, with the self-hosted runner `gh-runner-woodpecker`
+(in `/home/gautier/docker/gh-runner-woodpecker`) auto-deploying on push to `main`. The
+Telegram handle is still `@jolt_todo_bot` until it is changed in BotFather. The sidecar
 SQLite file (nag state + display snapshot, not tasks) lives in the bind-mounted
 `./data`. See `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for
 the original behavior and rationale, `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
