@@ -1,4 +1,4 @@
-"""One-time migration of the old Jolt SQLite tasks into Vikunja.
+"""One-time migration of the old Woodpecker SQLite tasks into Vikunja.
 
 Usage:
     VIKUNJA_URL=... VIKUNJA_TOKEN=... VIKUNJA_PROJECT_ID=... \
@@ -34,7 +34,7 @@ def migrate(old_db_path, vikunja, sidecar_conn, now, history_days=90) -> dict:
         raise MigrationAborted(
             "Vikunja Backlog is not empty; refusing to migrate to avoid duplicates."
         )
-    from jolt import sidecar as sc
+    from woodpecker import sidecar as sc
 
     conn = sqlite3.connect(old_db_path)
     conn.row_factory = sqlite3.Row
@@ -70,8 +70,8 @@ def migrate(old_db_path, vikunja, sidecar_conn, now, history_days=90) -> dict:
 def main(argv):
     import os
 
-    from jolt import sidecar as sc
-    from jolt.vikunja import VikunjaClient
+    from woodpecker import sidecar as sc
+    from woodpecker.vikunja import VikunjaClient
 
     old_db_path, sidecar_path = argv[1], argv[2]
     vk = VikunjaClient(

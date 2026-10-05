@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
-from jolt import sidecar, store
-from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
+from woodpecker import sidecar, store
+from woodpecker.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING, Task
 
 
 class FakeVikunja:

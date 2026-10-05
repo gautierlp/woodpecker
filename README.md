@@ -1,58 +1,61 @@
 <a id="readme-top"></a>
 
 <!-- PROJECT SHIELDS -->
-[![License: MIT][license-shield]][license-url]
 [![Python][python-shield]][python-url]
-[![Powered by Claude][claude-shield]][claude-url]
-[![Status][status-shield]][status-url]
+[![Claude][claude-shield]][claude-url]
+[![Telegram][telegram-shield]][telegram-url]
+[![License: MIT][license-shield]][license-url]
 
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
-  <a href="https://github.com/gautierlp/jolt">
-    <img src="docs/assets/jolt-icon.svg" alt="Jolt logo" width="110" height="110">
+  <a href="https://github.com/gautierlp/woodpecker">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/woodpecker-logo-dark.svg">
+      <img src="docs/assets/woodpecker-logo.svg" alt="woodpecker" width="160" height="160">
+    </picture>
   </a>
 
-  <h3 align="center">Jolt</h3>
+  <h1 align="center">woodpecker</h1>
 
   <p align="center">
-    A todo list that chases you. It pushes the tasks you keep avoiding back in your face, and does not let you hide.
-    <br />
-    <a href="docs/superpowers/specs/2026-07-12-accountability-bot-design.md"><strong>Read the design spec »</strong></a>
+    <em>It knocks at 6 am. It knocks at noon. It knocks until the task is done.</em>
     <br />
     <br />
-    <a href="https://github.com/gautierlp/jolt/issues">Report Bug</a>
+    A Telegram bot that keeps pecking at the tasks you avoid.
+    <br />
+    <a href="#usage"><strong>See what it says »</strong></a>
+    <br />
+    <br />
+    <a href="src/woodpecker/selection.py">Read the rule</a>
     &middot;
-    <a href="https://github.com/gautierlp/jolt/issues">Request Feature</a>
+    <a href="https://github.com/gautierlp/woodpecker/issues/new">Report bug</a>
+    &middot;
+    <a href="https://github.com/gautierlp/woodpecker/issues/new">Request feature</a>
   </p>
 </div>
 
 <!-- TABLE OF CONTENTS -->
 <details>
-  <summary>Table of Contents</summary>
+  <summary>Table of contents</summary>
   <ol>
     <li>
-      <a href="#about-the-project">About The Project</a>
+      <a href="#about-the-project">About the project</a>
       <ul>
-        <li><a href="#how-it-works">How It Works</a></li>
-        <li><a href="#built-with">Built With</a></li>
+        <li><a href="#built-with">Built with</a></li>
       </ul>
     </li>
     <li>
-      <a href="#getting-started">Getting Started</a>
+      <a href="#getting-started">Getting started</a>
       <ul>
         <li><a href="#prerequisites">Prerequisites</a></li>
         <li><a href="#installation">Installation</a></li>
+        <li><a href="#configuration">Configuration</a></li>
       </ul>
     </li>
-    <li>
-      <a href="#usage">Usage</a>
-      <ul>
-        <li><a href="#talking-to-jolt">Talking to Jolt</a></li>
-        <li><a href="#the-daily-rhythm">The daily rhythm</a></li>
-        <li><a href="#the-avoidance-hunter">The avoidance hunter</a></li>
-      </ul>
-    </li>
+    <li><a href="#usage">Usage</a></li>
+    <li><a href="#how-it-works">How it works</a></li>
+    <li><a href="#faq">FAQ</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
@@ -62,179 +65,235 @@
 </details>
 
 <!-- ABOUT THE PROJECT -->
-## About The Project
+## About the project
 
-[![Jolt][product-cover]](docs/assets/jolt-social.png)
+"Call the accountant" has been on your list for nine days. You have looked at it every
+morning. You have done six easier things instead, every morning.
 
-> ✅ **Deployed and running, now backed by Vikunja.** The full app and its tests exist (see the [spec](docs/superpowers/specs/2026-07-12-accountability-bot-design.md)) and it is live on the homelab host `jarvis`, auto-deploying on push to `main`. Vikunja is the task store (source of truth, over its REST API); Jolt is the nagging brain over it. See the [cutover runbook](docs/CUTOVER.md) for how the backlog moved. The Usage section below describes the interface.
+A todo list waits for you. A woodpecker does not. You text it your tasks in plain words,
+and it files them in Vikunja. At 6 am it picks the frog, the one task you least want to
+do, and puts it at the top of the message. Then it comes back at 9, 13 and 19. A task
+that matters and has not moved in three days gets louder each time. Before it gets
+loud, it asks what is blocking you.
 
-Jolt is a private Telegram bot that fights task avoidance. It is an ordinary todo list (you keep a full backlog and mean to clear all of it), with one specific twist: instead of sitting there passively like every other list, Jolt **actively pushes you at the tasks you keep avoiding**, ranked by how much you are dodging them. An important task that has sat untouched for days is the signal it is being deferred, and that is exactly what Jolt shoves back in your face.
-
-It is built around one personal fact: persistent nagging actually works on its user. So Jolt leans into persistence rather than passivity, while staying humane (it asks what is blocking you before it gets loud, and it never pings during quiet hours).
-
-Single-user, self-hosted, not a SaaS.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-### How It Works
-
-1. **Capture, friction-free.** You text Jolt naturally ("call the accountant by friday"). Claude reads it and files the task, asking once for context only if it matters.
-2. **Daily push at 06:00.** A short, Claude-written message leads with one clear "hit this" item plus the tasks you are avoiding most, followed by a plain, mechanical dump of the full backlog for reference. Leading with a few items is an anti-overwhelm choice, not a cap: clear as much as you like.
-3. **Nag through the day.** Morning, midday, evening. If the pushed task is still untouched by evening, the tone gets more direct. Never before 06:00, never after 23:00.
-4. **Hunt avoidance.** Anything sitting untouched for 3 days is a candidate. Importance decides how hard Jolt pushes: an important old task is loud and top of the pile, a low-stakes old task stays quiet. Jolt first asks what is blocking it (break it down? drop it?), and escalates only if you keep dodging.
-5. **Close it out.** You say "done with the taxes" and Jolt marks it complete with a plain acknowledgment.
-
-A deliberate split runs through the whole thing: **Claude** handles judgment and tone (parsing, intent, the focus and nag messages); **plain code** handles anything mechanical (the backlog dump, the stale-age math, ordering, quiet hours, scheduling). A mechanical list should never be reworded or hallucinated.
+It stops at 23:00. It starts again at 6.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Built With
+### Built with
 
-[![Python][python-badge]][python-url]
-[![Claude][claude-badge]][claude-url]
-[![Telegram][telegram-badge]][telegram-url]
-[![SQLite][sqlite-badge]][sqlite-url]
-[![Docker][docker-badge]][docker-url]
-
-- **[python-telegram-bot][telegram-url]** — the messaging layer
-- **[Anthropic Claude][claude-url]** — interprets messages, writes the nudges
-- **[Vikunja](https://vikunja.io/)**: the task store, self-hosted, reached over its REST API
-- **APScheduler** — fires the 06:00 focus, the nags, the daily stale-scan
-- **SQLite**: Jolt's own sidecar file (nag state + display snapshot), not the backlog
-- **Docker** — one container on the homelab host
+* [![Python][python-shield]][python-url]
+* [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) for the chat
+* [Claude](https://www.anthropic.com/claude) (Haiku 4.5) to read your messages and write the nags
+* [Vikunja](https://vikunja.io/) as the task store, over its REST API
+* APScheduler for the 6 am message and the nags
+* SQLite for the bot's own state (when it last nagged, the last list it showed you)
+* Docker, one container
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- GETTING STARTED -->
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- **Python ≥ 3.12**
-- **[uv](https://docs.astral.sh/uv/)** for dependency management
-- A **Telegram bot token** (from [@BotFather](https://t.me/BotFather))
-- An **Anthropic API key** (`ANTHROPIC_API_KEY`)
-- A running **Vikunja** instance, a project to use as the backlog, and an API token
-  (`VIKUNJA_URL`, `VIKUNJA_TOKEN`, `VIKUNJA_PROJECT_ID`)
+* Python 3.12 or newer and [uv](https://docs.astral.sh/uv/)
+* A Telegram bot token from [@BotFather](https://t.me/BotFather), and your own chat id
+* An Anthropic API key
+* A Vikunja instance, a project to hold the backlog, and an API token
 
 ### Installation
 
-```bash
-git clone https://github.com/gautierlp/jolt.git
-cd jolt
-uv sync                       # create the virtualenv and install dependencies
-cp .env.example .env          # then fill in Telegram, Anthropic, and Vikunja details
-uv run python src/main.py     # run locally
-```
+1. Clone the repo
+   ```sh
+   git clone https://github.com/gautierlp/woodpecker.git
+   cd woodpecker
+   ```
+2. Install and run the tests
+   ```sh
+   uv sync --extra dev
+   uv run pytest
+   ```
+3. Create the env file and fill it in
+   ```sh
+   cp .env.example .env
+   ```
+4. Start the bot
+   ```sh
+   uv run woodpecker
+   ```
 
-> This runs the app locally. It is also deployed on the homelab host `jarvis`, auto-deploying on push to `main` (see the [Roadmap](#roadmap)).
+To run it on a server, `docker compose up -d --build` does the same in a container.
+The workflow in `.github/workflows/deploy.yml` redeploys it on every push to `main`
+from a self-hosted runner.
+
+### Configuration
+
+All settings live in `.env`:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | none | The bot token. Required. |
+| `TELEGRAM_CHAT_ID` | none | Your chat id. The bot talks to no one else. Required. |
+| `ANTHROPIC_API_KEY` | none | Required. |
+| `VIKUNJA_URL`, `VIKUNJA_TOKEN`, `VIKUNJA_PROJECT_ID` | none | Where the backlog lives. Required. |
+| `WOODPECKER_DB_PATH` | `data/sidecar.db` | The bot's own SQLite file. |
+| `WOODPECKER_LOG_LEVEL` | `INFO` | `DEBUG` logs every message and every Claude call. |
+| `WOODPECKER_LOG_FILE` | `logs/woodpecker.log` | Empty turns the file log off. |
+
+The old `JOLT_*` names still work. The nag hours, the quiet hours and the three-day
+threshold are constants at the top of `src/woodpecker/config.py`.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE -->
 ## Usage
 
-### Talking to Jolt
-
-There are no rigid commands. You text Jolt like a person, and Claude works out what you meant:
+There are no commands to learn. You write to it like a person:
 
 ```
-you  → book the vet, important
-Jolt → Got it. "Book the vet" — flagged important. Anything by when?
-you  → this week
-Jolt → Noted, due Friday.
+you         book the vet, important
+woodpecker  Got it. "Book the vet", flagged important. By when?
+you         this week
+woodpecker  Noted, due Friday.
 
-you  → what should I do today?
-Jolt → Hit this first: book the vet (due Friday). Also still dodging: sort the insurance (5 days).
-
-you  → done with the vet
-Jolt → Done, nice.
+you         done with the vet
+woodpecker  Done, nice.
 ```
 
-### The daily rhythm
-
-- **06:00** — the daily push ("hit this" + the tasks you are avoiding most), then the full backlog underneath.
-- **Morning / midday / evening** — up to three nudges; blunter by evening if untouched, and louder on important tasks than low-stakes ones.
-- **Quiet hours** — nothing before 06:00 or after 23:00, ever.
-
-### The avoidance hunter
-
-A task untouched for **3 days** becomes a candidate. How hard Jolt pushes depends on importance: an important task that has gone stale is the real avoidance signal (you know it matters and still are not starting), so it ranks to the top and gets loud; a low-stakes stale task stays quiet at the bottom. Jolt gets curious before it gets loud:
+At 6 am:
 
 ```
-Jolt → "Sort the insurance" has sat 4 days. What's actually blocking it —
-       want to break it down, or drop it?
+woodpecker  Frog first: call the accountant. Nine days now, and it takes ten minutes.
+            Also waiting: sort the insurance (5 days), renew the passport (4 days).
+
+            Full list:
+            1. Call the accountant
+            2. Sort the insurance
+            ...
 ```
 
-Keep dodging and it escalates. Say "it's a someday thing" and it backs off. The threshold and quiet hours are single constants, easy to tune once it is running.
+When a task that matters goes stale:
+
+```
+woodpecker  "Sort the insurance" has sat for 4 days. What is blocking it?
+            Break it down, or drop it?
+```
+
+Say "it's a someday thing" and it backs off.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- HOW IT WORKS -->
+## How it works
+
+The code splits the work in two. Claude does what needs judgment: it reads your
+message, works out the intent, and writes the 6 am message and the nags. Plain Python
+does everything mechanical: the full backlog list, the age of each task, the order,
+the quiet hours, the schedule. A list you rely on should never be reworded by a model.
+
+1. **You write.** Claude turns the message into one or more intents (add, complete,
+   drop, reschedule, edit) and the bot applies them to Vikunja.
+2. **6 am.** The bot picks the frog from the tasks due today or overdue, at Medium
+   priority or higher. Claude writes two to four lines about it. The full list follows,
+   built by code.
+3. **9, 13, 19.** If the frog has not moved, a nag. The evening one is blunter.
+4. **Three days untouched.** The task becomes a candidate. Priority decides how hard
+   the bot pushes. A stale important task goes to the top and gets loud. A stale
+   low-priority one stays quiet, and the bot suggests you drop it.
+
+Vikunja holds every task. The bot keeps no copy of the list, only its own state in
+SQLite: when it last nagged about each task, and the order of the last list it sent,
+so "done with 3" means the third line you saw.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- FAQ -->
+## FAQ
+
+**Is it annoying?**
+That is the point. It is built for one person, and nagging works on that person.
+It still keeps quiet from 23:00 to 6:00, and it asks before it pushes.
+
+**Why Vikunja and not its own database?**
+The tasks should outlive the bot. Vikunja has a web app and a phone app, so you can
+edit the list when the bot is down.
+
+**Can several people use it?**
+No. It answers one chat id and ignores everyone else.
+
+**Why a woodpecker?**
+A woodpecker hits the same spot of the same tree, again and again, until it gets
+through. It also eats insects that hide under the bark, which is where
+your oldest tasks are.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- ROADMAP -->
 ## Roadmap
 
-- [x] Design spec ([`docs/superpowers/specs/`](docs/superpowers/specs/2026-07-12-accountability-bot-design.md))
-- [x] Brand identity (icon + cover)
-- [x] Implementation plan
-- [x] Storage + task logic (SQLite, add/complete/drop, ordering)
-- [x] Stale detection + daily-focus selection (pure, tested)
-- [x] Claude message interpretation + intent classification
-- [x] Telegram layer + scheduler (06:00 focus, nags, stale-scan)
-- [x] Deploy to `jarvis` (Docker + git auto-deploy)
-- [x] Refactor storage onto Vikunja as the task source of truth, sidecar SQLite for
-      nag state + display snapshot (see [`docs/CUTOVER.md`](docs/CUTOVER.md))
+- [x] Plain-language capture with Claude
+- [x] The 6 am frog and the three nags
+- [x] Stale detection, ranked by priority
+- [x] Vikunja as the task store
+- [x] Docker deploy with a self-hosted runner
 
-See the [open issues](https://github.com/gautierlp/jolt/issues) for the running list.
+See the [open issues](https://github.com/gautierlp/woodpecker/issues) for the rest.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTRIBUTING -->
 ## Contributing
 
-This is a private, single-user project, so there is no open contribution flow. If you are an AI assistant working on this repo, the conventions live in [`CLAUDE.md`](CLAUDE.md): TDD on the pure logic, mock the external APIs, follow the `billie_bot` / `fitness-data` patterns.
+Contributions are welcome. The project uses TDD: write the test, watch it fail, then
+write the code. Tests mock Telegram, Claude and Vikunja, so they need no keys.
+
+```sh
+uv run pytest
+uv run ruff check .
+```
+
+1. Fork the project
+2. Create your feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a pull request
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- LICENSE -->
 ## License
 
-Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
+Distributed under the MIT License. See [`LICENSE`](LICENSE).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTACT -->
 ## Contact
 
-Gautier Le Poher — gautier@lepoher.co
+Gautier Le Poher - gautier@lepoher.co
 
-Project Link: [https://github.com/gautierlp/jolt](https://github.com/gautierlp/jolt)
+Project link: [https://github.com/gautierlp/woodpecker](https://github.com/gautierlp/woodpecker)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- ACKNOWLEDGMENTS -->
 ## Acknowledgments
 
-- [Anthropic Claude](https://www.anthropic.com/claude) — the model behind the nudges
-- [`billie_bot`](https://github.com/gautierlp/billie_bot) and `fitness-data` — the homelab patterns this bot is modeled on
-- [Best-README-Template](https://github.com/othneildrew/Best-README-Template) — the structure of this README
+* Brian Tracy, *Eat That Frog!*, for the frog
+* [Vikunja](https://vikunja.io/)
+* [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
+* [Anthropic Claude](https://www.anthropic.com/claude)
+* [Shields.io](https://shields.io)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[license-shield]: https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge
-[license-url]: https://github.com/gautierlp/jolt/blob/main/LICENSE
-[python-shield]: https://img.shields.io/badge/python-%E2%89%A53.12-3776AB.svg?style=for-the-badge&logo=python&logoColor=white
+[python-shield]: https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white
 [python-url]: https://www.python.org/
-[claude-shield]: https://img.shields.io/badge/powered%20by-Claude-D97757.svg?style=for-the-badge&logo=anthropic&logoColor=white
+[claude-shield]: https://img.shields.io/badge/Claude-Haiku%204.5-D97757?style=for-the-badge&logo=anthropic&logoColor=white
 [claude-url]: https://www.anthropic.com/claude
-[status-shield]: https://img.shields.io/badge/status-deployed%20%26%20running-16A34A.svg?style=for-the-badge
-[status-url]: #roadmap
-[product-cover]: docs/assets/jolt-social.png
-[python-badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white
-[claude-badge]: https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=anthropic&logoColor=white
-[telegram-badge]: https://img.shields.io/badge/Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white
+[telegram-shield]: https://img.shields.io/badge/Telegram-bot-26A5E4?style=for-the-badge&logo=telegram&logoColor=white
 [telegram-url]: https://github.com/python-telegram-bot/python-telegram-bot
-[sqlite-badge]: https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white
-[sqlite-url]: https://www.sqlite.org/
-[docker-badge]: https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white
-[docker-url]: https://www.docker.com/
+[license-shield]: https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge
+[license-url]: #license

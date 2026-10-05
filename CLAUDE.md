@@ -1,9 +1,9 @@
-# Jolt
+# Woodpecker
 
-**Context card:** `~/vault/20 Areas/homelab/_area.md` (status, goals, links). Read it first.
+**Context card:** `~/vault/10 Projects/woodpecker/_project.md` (status, goals, links). Read it first.
 Decisions with their reason and logs of what was done go to that vault folder (never run git there); code docs, specs and plans stay in this repo.
 
-Telegram bot (working name: **Jolt**) that fights task avoidance. Holds a personal backlog, nudges toward one
+Telegram bot **woodpecker** (called Jolt until 2026-10-05) that fights task avoidance. Holds a personal backlog, nudges toward one
 focused thing each day, and gets pointedly insistent about tasks that have been quietly
 postponed. Plain-language interface powered by Claude.
 
@@ -14,7 +14,9 @@ Private single-user project, not a SaaS. Built to break a specific personal loop
 tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy workflow
 are in place, and the task store has been refactored onto Vikunja as the source of
 truth. Live on `jarvis` as the `jolt` container (bot `@jolt_todo_bot`), with the
-self-hosted runner `gh-runner-jolt` auto-deploying on push to `main`. The sidecar
+self-hosted runner `gh-runner-jolt` auto-deploying on push to `main`. Those three names,
+the checkout `/home/gautier/docker/jolt` and the compose service keep the old name for now:
+a new service name would make the next deploy start a second bot beside the old one. The sidecar
 SQLite file (nag state + display snapshot, not tasks) lives in the bind-mounted
 `./data`. See `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for
 the original behavior and rationale, `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
@@ -25,9 +27,9 @@ runbook.
 
 Single Python application in a Docker container on the homelab host `jarvis`.
 **Vikunja is the task store** (source of truth for the backlog, reached over its
-REST API); **Jolt is the nagging brain over it**. Jolt keeps a small sidecar
+REST API); **Woodpecker is the nagging brain over it**. Woodpecker keeps a small sidecar
 SQLite file for state that is its own, not Vikunja's: nag timestamps and the last
-rendered backlog order. No copy of the task list is kept in Jolt; every read goes
+rendered backlog order. No copy of the task list is kept in Woodpecker; every read goes
 live to Vikunja.
 
 External services:
@@ -78,7 +80,7 @@ Key libraries:
 Following the `billie_bot` shape:
 
 ```
-src/jolt/
+src/woodpecker/
   main.py         Entry point: wires up bot + scheduler, builds the clients, starts the app
   bot.py          Telegram handler: receives messages, sends replies and nags
   llm.py          Anthropic client: interprets messages, classifies intent, writes text
@@ -89,9 +91,9 @@ src/jolt/
   scheduler.py    Job bodies: daily focus and nags (wired to APScheduler cron in main.py)
   vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
                   the Task <-> Vikunja JSON field mapping
-  sidecar.py      SQLite access for Jolt's own state: the nag_state table and the
+  sidecar.py      SQLite access for Woodpecker's own state: the nag_state table and the
                   display_snapshot table (no task data)
-  store.py        Store: the storage seam the rest of Jolt talks to. Combines a
+  store.py        Store: the storage seam the rest of Woodpecker talks to. Combines a
                   VikunjaClient (task data) and the sidecar connection (nag state,
                   display snapshot) behind one interface returning Task
   models.py       Task and DailyFocus dataclasses and the status/priority constants
@@ -100,9 +102,9 @@ src/jolt/
 
 Storage is a `Store` seam over two backends: `vikunja.py`'s `VikunjaClient` holds the
 tasks themselves (Vikunja is the source of truth, reached over its REST API), and
-`sidecar.py` holds only what is Jolt's own: `nag_state` (`task_id`, `last_nagged_at`)
+`sidecar.py` holds only what is Woodpecker's own: `nag_state` (`task_id`, `last_nagged_at`)
 and `display_snapshot` (one row per chat: the ordered task ids of the last list
-shown). `store.py` is the only module the rest of Jolt (`orchestrator.py`,
+shown). `store.py` is the only module the rest of Woodpecker (`orchestrator.py`,
 `scheduler.py`) talks to; it returns and accepts the `Task` dataclass so the rest of
 the app is unaware Vikunja exists. The `Task` dataclass no longer has a `blocked_by`
 field, and the intent set is `add` / `complete` / `drop` / `reschedule` / `list` /
@@ -134,19 +136,19 @@ uv run ruff format .
 ```
 
 Environment variables: see `.env.example` (Telegram token, chat ID, Anthropic API key,
-Vikunja URL/token/project id, sidecar `JOLT_DB_PATH`). Never commit `.env`.
+Vikunja URL/token/project id, sidecar `WOODPECKER_DB_PATH`, old name `JOLT_DB_PATH` still read). Never commit `.env`.
 
 ## Deployment
 
 Runs on the homelab host `jarvis` (SSH alias) as a Docker container under
 `/home/gautier/docker/<service>/`, next to a separately deployed Vikunja instance
-(`tasks.example.com`) that Jolt talks to over its REST API. Auto-deploys on git push via
+(`tasks.example.com`) that Woodpecker talks to over its REST API. Auto-deploys on git push via
 a self-hosted GitHub runner, the same pattern as the `fitness-data` service.
 
 The sidecar SQLite file (nag state + display snapshot only, no tasks) lives in a
 bind-mounted `./data/` directory so it survives restarts and is captured by the
 nightly restic to Backblaze B2 backup. The task backlog itself is not backed up by
-Jolt; it lives and is backed up as part of the Vikunja deployment.
+Woodpecker; it lives and is backed up as part of the Vikunja deployment.
 
 ```bash
 # Tail logs

@@ -7,4 +7,4 @@ COPY pyproject.toml uv.lock ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-CMD ["uv", "run", "jolt"]
+CMD ["uv", "run", "woodpecker"]

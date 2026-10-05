@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="ink" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="6"/>
+    </filter>
+  </defs>
+  <g filter="url(#ink)" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- the trunk -->
+    <path d="M352 28 C346 160 350 330 344 492 L452 492 C446 330 450 160 444 28 Z" fill="#000" stroke-width="8"/>
+    <path d="M382 70 C378 110 384 140 380 170 M414 250 C410 290 416 320 412 360 M386 400 C382 430 388 450 384 476"
+          fill="none" stroke-width="5"/>
+    <g transform="translate(-50 -20) scale(1.1)">
+    <!-- tail, propped on the trunk -->
+    <path d="M262 352 C282 392 310 430 340 460 L350 442 C326 410 304 378 292 344 Z" fill="#fff" stroke-width="6"/>
+    <!-- body and head, black -->
+    <path d="M300 150 C326 144 346 160 346 184 C346 204 334 216 318 222
+             C330 262 326 318 300 352 C282 374 252 370 240 346
+             C226 316 236 266 262 228 C270 214 276 204 278 188
+             C278 168 286 154 300 150 Z" fill="#fff" stroke-width="6"/>
+    <!-- white face stripe -->
+    <path d="M286 196 C300 204 318 206 334 200 C326 214 304 220 284 212 Z" fill="#000" stroke-width="4"/>
+    <!-- white wing bars -->
+    <path d="M254 270 C268 262 284 262 296 268 M250 296 C264 288 280 288 292 294 M250 322 C262 314 276 314 288 320"
+          fill="none" stroke="#000" stroke-width="7"/>
+    <!-- beak, at the bark -->
+    <path d="M340 178 L366 196 L340 202 Z" fill="#fff" stroke-width="6"/>
+    <!-- eye -->
+    <circle cx="318" cy="176" r="5" fill="#000" stroke="none"/>
+    <!-- feet on the bark -->
+    <path d="M298 340 L362 330 M300 352 L362 348" fill="none" stroke-width="7"/>
+    </g>
+    <path d="M250 112 C262 96 278 88 294 88 M226 98 C246 72 274 62 298 62" fill="none" stroke-width="6"/>
+  </g>
+  <!-- wood chips -->
+  <g fill="#fff">
+    <path d="M356 164 l16 -8 l-3 16 Z"/><path d="M372 138 l14 2 l-8 12 Z"/><path d="M350 132 l12 -4 l-2 13 Z"/>
+    <circle cx="140" cy="120" r="3"/><circle cx="160" cy="98" r="2"/><circle cx="120" cy="440" r="3"/>
+    <circle cx="96" cy="300" r="2.5"/><circle cx="210" cy="180" r="2"/><circle cx="180" cy="420" r="2"/>
+  </g>
+</svg>

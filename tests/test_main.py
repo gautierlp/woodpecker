@@ -1,8 +1,8 @@
 import logging
 from logging.handlers import RotatingFileHandler
 
-from jolt import main
-from jolt.store import Store
+from woodpecker import main
+from woodpecker.store import Store
 
 
 def _file_handlers(handlers):
@@ -22,8 +22,8 @@ def _console_handlers(handlers):
 def test_build_log_handlers_adds_file_when_configured(tmp_path, monkeypatch):
     # A rotating file handler is added at the configured path, and its missing parent
     # directory is created. The stdout handler stays, so `docker logs` keeps working.
-    log_file = tmp_path / "nested" / "jolt.log"
-    monkeypatch.setenv("JOLT_LOG_FILE", str(log_file))
+    log_file = tmp_path / "nested" / "woodpecker.log"
+    monkeypatch.setenv("WOODPECKER_LOG_FILE", str(log_file))
 
     handlers = main._build_log_handlers()
 
@@ -37,11 +37,11 @@ def test_build_log_handlers_adds_file_when_configured(tmp_path, monkeypatch):
 def test_build_log_handlers_file_handler_persists_records(tmp_path, monkeypatch):
     # The redeploy-log-loss fix: records written through the file handler land in a file
     # on the (bind-mounted) host path, so history survives container recreation.
-    log_file = tmp_path / "jolt.log"
-    monkeypatch.setenv("JOLT_LOG_FILE", str(log_file))
+    log_file = tmp_path / "woodpecker.log"
+    monkeypatch.setenv("WOODPECKER_LOG_FILE", str(log_file))
 
     handler = _file_handlers(main._build_log_handlers())[0]
-    record = logging.LogRecord("jolt.test", logging.INFO, __file__, 1, "persisted-line", None, None)
+    record = logging.LogRecord("woodpecker.test", logging.INFO, __file__, 1, "persisted-line", None, None)
     handler.emit(record)
     handler.flush()
     handler.close()
@@ -50,8 +50,8 @@ def test_build_log_handlers_file_handler_persists_records(tmp_path, monkeypatch)
 
 
 def test_build_log_handlers_omits_file_when_disabled(monkeypatch):
-    # JOLT_LOG_FILE="" turns file logging off but keeps the stdout handler.
-    monkeypatch.setenv("JOLT_LOG_FILE", "")
+    # WOODPECKER_LOG_FILE="" turns file logging off but keeps the stdout handler.
+    monkeypatch.setenv("WOODPECKER_LOG_FILE", "")
 
     handlers = main._build_log_handlers()
 
@@ -109,8 +109,8 @@ def test_main_wires_vikunja_backed_store_into_bot_data(tmp_path, monkeypatch):
         "VIKUNJA_URL": "https://vikunja.example.com",
         "VIKUNJA_TOKEN": "test-vikunja-token",
         "VIKUNJA_PROJECT_ID": "7",
-        "JOLT_LOG_FILE": "",
-        "JOLT_DB_PATH": str(db_path),
+        "WOODPECKER_LOG_FILE": "",
+        "WOODPECKER_DB_PATH": str(db_path),
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)

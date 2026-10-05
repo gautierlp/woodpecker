@@ -234,7 +234,7 @@ def interpret_message(
     display_ids: list[int] | None = None,
 ) -> list[Intent]:
     system = (
-        "You are Jolt, a personal accountability bot. Read the user's message and record "
+        "You are Woodpecker, a personal accountability bot. Read the user's message and record "
         "what it means by calling record_intent. A single message can contain several things "
         "at once (for example a pasted list of tasks); call record_intent once per distinct "
         "task or action. When adding tasks, never fold several into one add. "
@@ -286,11 +286,11 @@ def interpret_message(
     system += "Current backlog:\n" + _task_lines(display_ids, tasks, now)
     messages = list(history or [])
     if recent_outbound and messages:
-        # The pending nag/focus is the freshest thing Jolt said, but it lives outside
+        # The pending nag/focus is the freshest thing Woodpecker said, but it lives outside
         # `history`. Without it in the transcript, a reply like "what are you talking
-        # about?" resolves against the last handled turn (often a stale backlog) and Jolt
+        # about?" resolves against the last handled turn (often a stale backlog) and Woodpecker
         # answers about the wrong thing. Add it as the most recent assistant turn so the
-        # transcript reflects what Jolt actually last said. The API merges consecutive
+        # transcript reflects what Woodpecker actually last said. The API merges consecutive
         # same-role messages, so this is safe even when `history` already ends with an
         # assistant turn. Skip it when there is no history: the message list must start
         # with a user turn, and with no prior turns there is no stale transcript for the
@@ -361,7 +361,7 @@ def write_focus(frog: Task | None, now: datetime, client) -> str:
     age = (now - frog.created_at).days
     duration = _format_duration(frog.estimate_seconds)
     system = (
-        "You are Jolt. Write a short morning message (2 to 4 lines) about the ONE task below, "
+        "You are Woodpecker. Write a short morning message (2 to 4 lines) about the ONE task below, "
         "the single thing to attack today. Push to start it: name the blocker and a concrete "
         "small first step. If it has been pushed forward before, call that out plainly and get "
         "more insistent the more it has slipped. Be direct, never guilt-tripping. "
@@ -422,7 +422,7 @@ def write_nag(task: Task, now: datetime, client) -> str:
             "would they add it today? Still want it, or drop it? Stay easy to wave off."
         )
     system = (
-        "You are Jolt. Write one short nag (1 to 2 lines) about the task below. "
+        "You are Woodpecker. Write one short nag (1 to 2 lines) about the task below. "
         "This message arrives on its own, with no other context on the user's screen, so "
         "name the specific task you are nudging about (quote it or refer to it clearly) "
         "rather than assuming the user knows which one you mean. "

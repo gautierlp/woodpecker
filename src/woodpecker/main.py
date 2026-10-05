@@ -37,11 +37,11 @@ def _build_log_handlers() -> list[logging.Handler]:
 
 
 def setup_logging() -> None:
-    """Configure root logging once, at process start. Level is driven by JOLT_LOG_LEVEL
+    """Configure root logging once, at process start. Level is driven by WOODPECKER_LOG_LEVEL
     (default INFO; set DEBUG to trace everything). Even at DEBUG we keep the flood in
-    check: our own jolt.* loggers run at the root level, third-party libraries are capped
+    check: our own woodpecker.* loggers run at the root level, third-party libraries are capped
     at INFO, and the byte-level HTTP loggers are pinned to WARNING. So DEBUG still shows
-    Jolt's own lines and full Claude I/O without drowning them in poll-loop chatter.
+    Woodpecker's own lines and full Claude I/O without drowning them in poll-loop chatter.
 
     force=True so our handlers win even if an import configured root logging first."""
     logging.basicConfig(level=config.log_level(), handlers=_build_log_handlers(), force=True)
@@ -49,7 +49,7 @@ def setup_logging() -> None:
         logging.getLogger(lib).setLevel(logging.INFO)
     # httpx logs each request URL at INFO, and the Telegram token lives in that URL
     # path, so keep it at WARNING to avoid writing the bot token to the logs. Our own
-    # jolt.* lines and _log_usage already cover what those requests were doing.
+    # woodpecker.* lines and _log_usage already cover what those requests were doing.
     for wire in ("httpx", "httpcore", "hpack"):
         logging.getLogger(wire).setLevel(logging.WARNING)
 
@@ -95,7 +95,7 @@ def build_scheduler(store, send, client, chat_id) -> AsyncIOScheduler:
 
 def main() -> None:
     setup_logging()
-    logger.info("Starting Jolt")
+    logger.info("Starting Woodpecker")
     os.makedirs(os.path.dirname(config.sidecar_path()) or ".", exist_ok=True)
     logger.info("Opening sidecar database at %s", config.sidecar_path())
     conn = sidecar.connect(config.sidecar_path())

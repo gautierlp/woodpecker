@@ -6,12 +6,12 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from jolt import bot, sidecar
-from jolt.llm import Intent
-from jolt.memory import ConversationMemory
-from jolt.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
-from jolt.store import Store
-from jolt.vikunja import VikunjaClient, VikunjaError
+from woodpecker import bot, sidecar
+from woodpecker.llm import Intent
+from woodpecker.memory import ConversationMemory
+from woodpecker.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
+from woodpecker.store import Store
+from woodpecker.vikunja import VikunjaClient, VikunjaError
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -359,7 +359,7 @@ def test_handle_start_replies_with_welcome():
     context = make_context(fresh())
     asyncio.run(bot.handle_start(update, context))
     update.message.reply_text.assert_awaited_once()
-    assert "Jolt" in update.message.reply_text.call_args.args[0]
+    assert "Woodpecker" in update.message.reply_text.call_args.args[0]
 
 
 def test_handle_start_ignores_foreign_chat():

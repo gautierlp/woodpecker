@@ -6,7 +6,7 @@ class ConversationMemory:
     def __init__(self, max_pairs: int = 10):
         self._history: dict[int, list[dict[str, str]]] = {}
         self._max_pairs = max_pairs
-        # The latest message Jolt sent on its own (a nag or the daily focus) that the
+        # The latest message Woodpecker sent on its own (a nag or the daily focus) that the
         # user has not answered yet. Kept apart from _history because it has no
         # preceding user turn, and the Claude API needs the message list to start with
         # one; it rides in the system prompt instead so a reply like "done" resolves.

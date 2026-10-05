@@ -1,4 +1,4 @@
-from jolt.memory import ConversationMemory
+from woodpecker.memory import ConversationMemory
 
 
 def test_get_unknown_chat_returns_empty():

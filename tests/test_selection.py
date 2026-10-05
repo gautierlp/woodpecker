@@ -2,8 +2,8 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from jolt import selection
-from jolt.models import (
+from woodpecker import selection
+from woodpecker.models import (
     STATUS_DONE,
     STATUS_PENDING,
     Task,
@@ -218,7 +218,7 @@ def test_slow_resurface_excludes_stale_high_task():
 
 
 def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
-    from jolt import config, selection
+    from woodpecker import config, selection
 
     now = datetime(2026, 7, 12, 13, tzinfo=TZ)
     created = now - timedelta(days=10)  # stale

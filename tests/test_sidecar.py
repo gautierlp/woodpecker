@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from jolt import sidecar
+from woodpecker import sidecar
 
 
 def _conn():

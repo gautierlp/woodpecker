@@ -3,8 +3,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from jolt import config
-from jolt.models import Task, DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING
+from woodpecker import config
+from woodpecker.models import Task, DailyFocus, PRIORITY_IMPORTANT, STATUS_PENDING
 
 
 def test_constants_present():
@@ -35,12 +35,12 @@ def test_task_and_focus_construct():
 
 
 def test_sidecar_path_defaults_when_unset(monkeypatch):
-    from jolt import config
+    from woodpecker import config
 
-    monkeypatch.delenv("JOLT_DB_PATH", raising=False)
+    monkeypatch.delenv("WOODPECKER_DB_PATH", raising=False)
     # Deliberately not data/jolt.db: that name belongs to the pre-Vikunja database whose
     # `tasks` table is not a sidecar schema (see docs/CUTOVER.md). Defaulting to it would
-    # point a fresh deploy with no JOLT_DB_PATH set at the wrong file.
+    # point a fresh deploy with no WOODPECKER_DB_PATH set at the wrong file.
     assert config.sidecar_path() == "data/sidecar.db"
 
 
@@ -60,30 +60,30 @@ def test_vikunja_project_id_reads_env_as_int(monkeypatch):
 
 
 def test_log_level_defaults_to_info_and_uppercases(monkeypatch):
-    from jolt import config
+    from woodpecker import config
 
-    monkeypatch.delenv("JOLT_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("WOODPECKER_LOG_LEVEL", raising=False)
     assert config.log_level() == "INFO"
-    monkeypatch.setenv("JOLT_LOG_LEVEL", "debug")
+    monkeypatch.setenv("WOODPECKER_LOG_LEVEL", "debug")
     assert config.log_level() == "DEBUG"
 
 
 def test_log_file_defaults_to_a_path_under_logs(monkeypatch):
     # A default path (not None) so logs persist out of the box. It lives under ./logs,
     # which is bind-mounted in the container, so the file survives redeploys.
-    monkeypatch.delenv("JOLT_LOG_FILE", raising=False)
-    assert config.log_file() == "logs/jolt.log"
+    monkeypatch.delenv("WOODPECKER_LOG_FILE", raising=False)
+    assert config.log_file() == "logs/woodpecker.log"
 
 
 def test_log_file_respects_env_override(monkeypatch):
-    monkeypatch.setenv("JOLT_LOG_FILE", "/app/logs/jolt.log")
-    assert config.log_file() == "/app/logs/jolt.log"
+    monkeypatch.setenv("WOODPECKER_LOG_FILE", "/app/logs/woodpecker.log")
+    assert config.log_file() == "/app/logs/woodpecker.log"
 
 
 def test_log_file_empty_string_disables_file_logging(monkeypatch):
     # An explicit empty value turns file logging off (handy for local runs and tests),
     # rather than creating a stray ./ file.
-    monkeypatch.setenv("JOLT_LOG_FILE", "")
+    monkeypatch.setenv("WOODPECKER_LOG_FILE", "")
     assert config.log_file() is None
 
 
@@ -102,3 +102,22 @@ def test_call_cost_usd_uses_input_and_output_prices():
 def test_call_cost_usd_of_a_typical_call():
     # ~4000 input + 60 output on Haiku pricing ($1 / $5 per MTok) is about $0.0043.
     assert config.call_cost_usd(4000, 60) == pytest.approx(0.0043)
+
+
+def test_settings_fall_back_to_the_old_jolt_names(monkeypatch):
+    # The bot was called Jolt before. The .env on jarvis still uses the JOLT_* names, so
+    # they must keep working until that file is renamed.
+    for name in ("DB_PATH", "LOG_LEVEL", "LOG_FILE"):
+        monkeypatch.delenv(f"WOODPECKER_{name}", raising=False)
+    monkeypatch.setenv("JOLT_DB_PATH", "data/old.db")
+    monkeypatch.setenv("JOLT_LOG_LEVEL", "debug")
+    monkeypatch.setenv("JOLT_LOG_FILE", "")
+    assert config.sidecar_path() == "data/old.db"
+    assert config.log_level() == "DEBUG"
+    assert config.log_file() is None
+
+
+def test_new_setting_names_win_over_the_old_ones(monkeypatch):
+    monkeypatch.setenv("JOLT_DB_PATH", "data/old.db")
+    monkeypatch.setenv("WOODPECKER_DB_PATH", "data/new.db")
+    assert config.sidecar_path() == "data/new.db"

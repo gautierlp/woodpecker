@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from jolt import sidecar
+from woodpecker import sidecar
 from scripts import migrate_to_vikunja as m
 
 
@@ -30,7 +30,7 @@ class FakeVikunja:
         return [] if self._empty else [object()]
 
     def create_task(self, text, priority, deadline):
-        from jolt.models import STATUS_PENDING, Task
+        from woodpecker.models import STATUS_PENDING, Task
 
         self._next += 1
         t = Task(

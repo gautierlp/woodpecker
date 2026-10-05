@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from jolt import vikunja
-from jolt.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING
+from woodpecker import vikunja
+from woodpecker.models import PRIORITY_IMPORTANT, PRIORITY_NORMAL, STATUS_DONE, STATUS_PENDING
 
 
 def test_parse_estimate_reads_the_mdone_sentinel():
@@ -384,7 +384,7 @@ def test_list_projects_paginates_across_pages():
 def test_list_open_still_reads_the_write_project_when_not_enumerated():
     # The client's write-target project id is 3 (see _client). If /api/v1/projects
     # doesn't include it (e.g. it got archived), list_open must still read it
-    # directly so tasks Jolt itself created there never silently vanish.
+    # directly so tasks Woodpecker itself created there never silently vanish.
     def handler(request):
         path = request.url.path
         if path.endswith("/api/v1/projects"):

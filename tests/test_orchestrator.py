@@ -1,9 +1,9 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from jolt import orchestrator
-from jolt.llm import Intent
-from jolt.models import (
+from woodpecker import orchestrator
+from woodpecker.llm import Intent
+from woodpecker.models import (
     PRIORITY_NORMAL,
     STATUS_DONE,
     STATUS_DROPPED,

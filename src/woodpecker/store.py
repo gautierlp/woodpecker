@@ -7,8 +7,8 @@ from .models import STATUS_DONE, Task
 
 class Store:
     """The task-storage seam. Vikunja is the source of truth for tasks; the sidecar holds
-    Jolt's own nag state and the display snapshot. Returns and accepts the Task dataclass so
-    the rest of Jolt is unaware of Vikunja."""
+    Woodpecker's own nag state and the display snapshot. Returns and accepts the Task dataclass so
+    the rest of Woodpecker is unaware of Vikunja."""
 
     def __init__(self, vikunja, sidecar_conn):
         self._vk = vikunja
@@ -52,7 +52,7 @@ class Store:
     ) -> Task | None:
         """Move an existing task's due date and/or priority. Deliberately an update, not an
         add: the bump counter in the sidecar keys off task_id, so re-adding the task under a
-        new id would reset the avoidance signal that Jolt nags on. The bump itself is counted
+        new id would reset the avoidance signal that Woodpecker nags on. The bump itself is counted
         by apply_due_snapshot on the next list_pending, which diffs the stored due date."""
         task = self._vk.get_task(task_id)
         if task is None or task.status == STATUS_DONE:

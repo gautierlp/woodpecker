@@ -4,9 +4,9 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from jolt import config, main, scheduler, sidecar
-from jolt.models import STATUS_PENDING, Task
-from jolt.store import Store
+from woodpecker import config, main, scheduler, sidecar
+from woodpecker.models import STATUS_PENDING, Task
+from woodpecker.store import Store
 
 TZ = ZoneInfo("Europe/Paris")
 

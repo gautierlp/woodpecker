@@ -107,7 +107,7 @@ class VikunjaClient:
         self._list_view_ids: dict[int, int] = {}
 
     def close(self) -> None:
-        """Close the underlying HTTP connection pool. Jolt runs as a long-lived process so
+        """Close the underlying HTTP connection pool. Woodpecker runs as a long-lived process so
         this is rarely needed there, but it lets callers (and tests) release sockets cleanly."""
         self._http.close()
 
@@ -202,7 +202,7 @@ class VikunjaClient:
         projects = self.list_projects()
         if self._project_id not in {pid for pid, _ in projects}:
             # The configured write-target project may be missing from the enumerated
-            # set (e.g. it was archived, or pagination somehow missed it). Tasks Jolt
+            # set (e.g. it was archived, or pagination somehow missed it). Tasks Woodpecker
             # itself creates there must never silently vanish from the backlog, so read
             # it directly regardless.
             _log.warning(

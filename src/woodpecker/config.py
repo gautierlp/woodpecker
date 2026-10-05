@@ -21,7 +21,7 @@ DAILY_FOCUS_HOUR = 6
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"
 # USD per million tokens for MODEL, from Anthropic's pricing. Update these together with
-# MODEL. Haiku 4.5 is $1.00 in / $5.00 out per 1M tokens. Jolt sends no cached tokens, so
+# MODEL. Haiku 4.5 is $1.00 in / $5.00 out per 1M tokens. Woodpecker sends no cached tokens, so
 # input is always billed at the full rate.
 MODEL_PRICE_INPUT_USD_PER_MTOK = 1.00
 MODEL_PRICE_OUTPUT_USD_PER_MTOK = 5.00
@@ -57,24 +57,33 @@ def vikunja_project_id() -> int:
     return int(os.environ["VIKUNJA_PROJECT_ID"])
 
 
+def _setting(name: str, default: str) -> str:
+    # WOODPECKER_<name>, else the JOLT_<name> it was called before the rename (the .env on
+    # jarvis may still use it), else the default.
+    for key in (f"WOODPECKER_{name}", f"JOLT_{name}"):
+        if key in os.environ:
+            return os.environ[key]
+    return default
+
+
 def sidecar_path() -> str:
     # data/sidecar.db, not data/jolt.db: the latter is the pre-Vikunja database, still kept
     # on the host as a rollback artifact, and its `tasks` table is not a sidecar schema.
     # See docs/CUTOVER.md.
-    return os.environ.get("JOLT_DB_PATH", "data/sidecar.db")
+    return _setting("DB_PATH", "data/sidecar.db")
 
 
 def log_level() -> str:
-    return os.environ.get("JOLT_LOG_LEVEL", "INFO").upper()
+    return _setting("LOG_LEVEL", "INFO").upper()
 
 
 def log_file() -> str | None:
     # Path for a persistent log file, written in addition to stdout. It lives under a
     # bind-mounted directory in the container (see docker-compose.yml), so the log
     # survives container recreation: Docker discards a recreated container's own stdout
-    # on every redeploy, which was wiping the whole history. Set JOLT_LOG_FILE="" to
+    # on every redeploy, which was wiping the whole history. Set WOODPECKER_LOG_FILE="" to
     # disable file logging (local runs, tests).
-    return os.environ.get("JOLT_LOG_FILE", "logs/jolt.log") or None
+    return _setting("LOG_FILE", "logs/woodpecker.log") or None
 
 
 def call_cost_usd(input_tokens: int, output_tokens: int) -> float:

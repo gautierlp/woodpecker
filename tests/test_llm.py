@@ -4,8 +4,8 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from jolt import llm
-from jolt.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
+from woodpecker import llm
+from woodpecker.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -259,9 +259,9 @@ def test_prompt_omits_outbound_section_when_none():
 
 
 def test_pending_nag_is_woven_into_transcript_after_history():
-    # The incoherent-reply bug: a nag is Jolt's freshest message but lives only in the
+    # The incoherent-reply bug: a nag is Woodpecker's freshest message but lives only in the
     # system prompt, so a reply like "what are you talking about?" resolved against the
-    # last handled turn (a stale backlog) rather than the nag, and Jolt answered "I showed
+    # last handled turn (a stale backlog) rather than the nag, and Woodpecker answered "I showed
     # you your task list." The nag must appear as the most recent assistant turn in the
     # transcript, right before the new user message.
     tool_block = SimpleNamespace(
@@ -430,7 +430,7 @@ def test_log_usage_includes_dollar_cost(caplog):
         stop_reason="tool_use",
         usage=SimpleNamespace(input_tokens=4000, output_tokens=60),
     )
-    with caplog.at_level(logging.INFO, logger="jolt.llm"):
+    with caplog.at_level(logging.INFO, logger="woodpecker.llm"):
         llm._log_usage("interpret_message", response)
     message = caplog.records[-1].getMessage()
     assert "in=4000" in message
@@ -442,7 +442,7 @@ def test_log_usage_handles_missing_usage(caplog):
     # A response without a usage block (a malformed / error response) must not crash the
     # log call; cost is reported as unknown rather than a wrong number.
     response = SimpleNamespace(stop_reason="end_turn", usage=None)
-    with caplog.at_level(logging.INFO, logger="jolt.llm"):
+    with caplog.at_level(logging.INFO, logger="woodpecker.llm"):
         llm._log_usage("write_nag", response)
     message = caplog.records[-1].getMessage()
     assert "cost=?" in message
@@ -530,7 +530,7 @@ def test_text_of_falls_back_when_no_text_block():
 
 
 def test_build_client_sets_a_short_timeout():
-    from jolt import config, llm
+    from woodpecker import config, llm
 
     client = llm.build_client("sk-test-not-a-real-key")
     assert client.timeout == config.ANTHROPIC_TIMEOUT_SECONDS
