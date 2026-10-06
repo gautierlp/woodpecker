@@ -34,9 +34,7 @@ jobs:
           if [ "$running" -lt 1 ]; then
             echo "::error::woodpecker container is not running"
             docker compose ps
-            docker compose logs --tail 80
             exit 1
           fi
           docker compose ps
-          docker compose logs --tail 20 || true
           echo "deploy ok: container running"
