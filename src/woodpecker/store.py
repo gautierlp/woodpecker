@@ -102,11 +102,11 @@ class Store:
     def set_open_prompt(self, kind: str, task_ids: list[int], when: datetime) -> None:
         sidecar.set_open_prompt(self._conn, kind, task_ids, when)
 
-    def get_open_prompt(self) -> sidecar.OpenPrompt | None:
-        return sidecar.get_open_prompt(self._conn)
+    def get_open_prompt(self, slot: str = sidecar.FROG_SLOT) -> sidecar.OpenPrompt | None:
+        return sidecar.get_open_prompt(self._conn, slot)
 
     def set_pending_drop(self, when: datetime | None) -> None:
         sidecar.set_pending_drop(self._conn, when)
 
-    def clear_open_prompt(self) -> None:
-        sidecar.clear_open_prompt(self._conn)
+    def clear_open_prompt(self, slot: str = sidecar.FROG_SLOT) -> None:
+        sidecar.clear_open_prompt(self._conn, slot)
