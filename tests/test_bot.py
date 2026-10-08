@@ -232,6 +232,11 @@ class RaisingStore:
     def list_pending(self):
         raise VikunjaError("vikunja unreachable")
 
+    def get_open_prompt(self):
+        # The letter parser reads the open prompt from the sidecar first; no prompt
+        # is open, so the message falls through to the free-text flow.
+        return None
+
 
 def test_handle_message_replies_friendly_message_when_vikunja_unreachable(monkeypatch):
     # During an outage every command must fail soft: log it, tell the user, and
@@ -390,3 +395,26 @@ def test_handle_error_swallows_notify_failure():
     context = make_error_context(RuntimeError("boom"))
     context.bot.send_message.side_effect = RuntimeError("telegram down")
     asyncio.run(bot.handle_error(make_update("hi"), context))  # must not raise
+
+
+def test_a_letter_reply_skips_claude(monkeypatch):
+    store = fresh([_task(1)])
+    store.record_frog(datetime(2026, 10, 8, tzinfo=TZ).date(), 1)
+    store.set_open_prompt("frog", [1], datetime(2026, 10, 8, 9, tzinfo=TZ))
+
+    def boom(*args, **kwargs):
+        raise AssertionError("Claude must not be called for a letter reply")
+
+    monkeypatch.setattr(bot.llm, "interpret_message", boom)
+    monkeypatch.setattr(bot.config, "now_paris", lambda: datetime(2026, 10, 8, 9, 5, tzinfo=TZ))
+    update = make_update("d")
+    asyncio.run(bot.handle_message(update, make_context(store)))
+    assert update.message.reply_text.call_args.args[0] == "Done, nice."
+
+
+def test_a_letter_with_no_prompt_is_refused(monkeypatch):
+    store = fresh([_task(1)])
+    monkeypatch.setattr(bot.llm, "interpret_message", lambda *a, **k: [])
+    update = make_update("x")
+    asyncio.run(bot.handle_message(update, make_context(store)))
+    assert update.message.reply_text.call_args.args[0] == "Nothing to answer right now."
