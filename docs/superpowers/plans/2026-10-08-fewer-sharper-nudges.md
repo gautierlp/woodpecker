@@ -32,6 +32,7 @@
 - After the 3rd `t` on a frog, the next morning asks `s` / `n` / `x` instead.
 - Vault: read-only bind mount `/home/agent/vault:/vault:ro`, reader copied from the dotclaude `/todo` skill, no shared package.
 - Woodpecker never writes to the vault; vault tasks are never the frog.
+- No Sunday weekly review: Sunday is a day like any other (decided after implementation, 2026-10-08).
 
 **Plan decisions (not in the spec; Gautier can veto before execution):**
 1. **The morning drops the "Today's priorities" list.** The spec goal is "each names one thing"; the old list with `render_matters` goes. The frog legend sits right after the frog, then the vault block comes last.

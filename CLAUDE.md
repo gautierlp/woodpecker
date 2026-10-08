@@ -34,8 +34,7 @@ live to Vikunja.
 
 External services:
 - **Vikunja API**: the task backlog (create, list open, get, mark done, delete)
-- **Telegram API**: messaging (receive user texts, send the morning, check-in and
-  weekly review)
+- **Telegram API**: messaging (receive user texts, send the morning and the check-in)
 - **Anthropic API**: Claude interprets each inbound message and writes the morning
   first step, the reframe question, and replies
 
@@ -45,9 +44,11 @@ Two messages a day at most. At 09:00 the morning names one frog (any pending tas
 overdue first, then most postponed, then oldest) with a Claude-written first step and
 the letter legend `d done · o on it · t tomorrow · x drop`, then a "From the vault:"
 block (vault tasks overdue, due within 7 days, or marked ⏫). The 14:00 check-in fires
-only when the frog has no answer yet, or a vault task is due today or overdue. On Sunday
-at 10:00 a weekly review lists up to 5 tasks pending 14 days or more; replies look like
-`x 1 3` or `w 2`. After the third `t` on a frog, the next morning asks
+only when the frog has no answer yet, or a vault task is due today or overdue. Sunday is
+a day like any other: no weekly review. Gautier answers in plain words ("done", "push it
+to tomorrow"): when a free-text intent completes, drops or reschedules the open frog's
+task, `bot._answer_frog` marks it `d`, `x` or `t` like the letter. The letters are a
+shortcut. After the third `t` on a frog, the next morning asks
 `s smaller step · n not mine to do · x drop`. The vault is mounted read-only at `/vault`
 (`WOODPECKER_VAULT_PATH`); Woodpecker never writes to it. Spec:
 `docs/superpowers/specs/2026-10-08-fewer-sharper-nudges-design.md`.
@@ -75,7 +76,7 @@ Key libraries:
 - `python-telegram-bot`: Telegram handler
 - `anthropic`: Claude API client
 - `httpx`: Vikunja REST client
-- `APScheduler`: cron-based scheduler (09:00 morning, 14:00 check-in, Sunday 10:00 weekly review)
+- `APScheduler`: cron-based scheduler (09:00 morning, 14:00 check-in, every day)
 - `sqlite3` (stdlib): sidecar storage (nag state + display snapshot only)
 
 ## Code Conventions
@@ -86,7 +87,7 @@ Key libraries:
 - Commits: conventional style (`feat(...)`, `fix(...)`), concise.
 - No over-engineering: single-user personal project. No abstractions for hypothetical
   future needs.
-- Behavior tunables (weekly review threshold = 14 days, reframe after 3 `t`,
+- Behavior tunables (reframe after 3 `t`, drop confirm = 10 minutes,
   quiet hours = 06:00 to 23:00) are single named constants in `config.py`, easy to
   change after living with the bot.
 
@@ -97,20 +98,21 @@ Following the `billie_bot` shape:
 ```
 src/woodpecker/
   main.py         Entry point: wires up bot + scheduler, builds the clients, starts the app
-  bot.py          Telegram handler: receives messages, sends replies
+  bot.py          Telegram handler: receives messages, sends replies, counts a plain
+                  answer about the open frog like its letter
   llm.py          Anthropic client: interprets messages, classifies intent, writes text
   orchestrator.py Applies a parsed intent (via the Store) and returns the reply text
-  selection.py    Pure rules: the frog, the weekly stale list, the vault reminders, quiet hours
+  selection.py    Pure rules: the frog, the vault reminders, quiet hours
   vault.py        Read-only reader of the Obsidian vault's open checkboxes
-  replies.py      Deterministic one-letter replies (d o t x s n, weekly x 1 3 / w 2)
+  replies.py      Deterministic one-letter replies (d o t x s n), a shortcut for plain words
   render.py       Deterministic backlog rendering and display ordering
   memory.py       In-process recent-conversation and pending-outbound memory per chat
-  scheduler.py    Job bodies: morning, check-in, weekly review (wired to APScheduler cron in main.py)
+  scheduler.py    Job bodies: morning and check-in (wired to APScheduler cron in main.py)
   vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
                   the Task <-> Vikunja JSON field mapping
   sidecar.py      SQLite access for Woodpecker's own state: the nag_state, display_snapshot,
                   bump_state, frog_state and open_prompt tables (no task data); open_prompt
-                  has a frog slot and a weekly slot
+                  is one row: the frog, reframe or step prompt a letter answers
   store.py        Store: the storage seam the rest of Woodpecker talks to. Combines a
                   VikunjaClient (task data) and the sidecar connection (nag state,
                   display snapshot) behind one interface returning Task
@@ -178,7 +180,8 @@ ssh jarvis "docker logs <container> --tail 100"
 - One test file per module.
 - External APIs (Telegram, Anthropic) are **mocked at the boundary**: no real HTTP calls
   in tests, so the suite is fast, free, and never spams the user.
-- **What to test:** frog selection (overdue, bump count, age), the letter replies, the
+- **What to test:** frog selection (overdue, bump count, age), the letter replies, plain-word
+  answers to the frog, the
   vault reader and windows, priority ordering for the backlog dump, quiet-hours
   enforcement, task add/complete/drop logic.
 - **What NOT to test:** actual LLM output quality, Telegram plumbing.
