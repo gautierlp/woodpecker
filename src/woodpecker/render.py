@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from . import config
 from .models import STATUS_PENDING, Task
 from .selection import order_backlog
+from .vault import VaultTask
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -117,4 +118,56 @@ def render_matters(tasks: list[Task], now: datetime) -> str:
     if hidden > 0:
         lines.append("")
         lines.append(f"+ {hidden} more (say 'list' to see everything)")
+    return "\n".join(lines)
+
+
+# One-letter replies: Beeper shows no Telegram inline buttons, so one letter is the
+# nearest thing to one tap. replies.py parses them.
+FROG_LEGEND = "d done · o on it · t tomorrow · x drop"
+REFRAME_LEGEND = "s smaller step · n not mine to do · x drop"
+_VAULT_FOOTER = "Tick these in Obsidian."
+
+
+def _vault_line(task: VaultTask, today: date) -> str:
+    if task.due is None:
+        when = ""
+    elif task.due < today:
+        when = "overdue, "
+    else:
+        when = f"📅 {task.due.isoformat()}, "
+    return f"• {task.text} ({when}{task.note})"
+
+
+def _vault_lines(header: str, tasks: list[VaultTask], today: date) -> str:
+    if not tasks:
+        return ""
+    lines = [header] + [_vault_line(t, today) for t in tasks] + [_VAULT_FOOTER]
+    return "\n".join(lines)
+
+
+def render_vault_block(tasks: list[VaultTask], today: date) -> str:
+    """The morning's vault block. Plain lines with no number: Woodpecker cannot tick a
+    vault box, so nothing here is answerable in the chat."""
+    return _vault_lines("From the vault:", tasks, today)
+
+
+def render_vault_due(tasks: list[VaultTask], today: date) -> str:
+    return _vault_lines("Due in the vault today:", tasks, today)
+
+
+def render_vault_unreadable(reason: str) -> str:
+    return f"Vault: not readable ({reason})"
+
+
+def render_checkin(task: Task, started: bool, legend: str) -> str:
+    line = f'How is "{task.text}" going?' if started else f'Still on for "{task.text}" today?'
+    return f"{line}\n{legend}"
+
+
+def render_weekly_review(tasks: list[Task], now: datetime) -> str:
+    lines = [f"Weekly review: these have waited {config.STALE_REVIEW_DAYS} days or more."]
+    for i, task in enumerate(tasks, 1):
+        lines.append(f"{i}. {task.text} ({(now - task.created_at).days}d)")
+    lines.append("")
+    lines.append("Reply like x 1 3 to drop 1 and 3, w 2 to move 2 to next week. The rest stay.")
     return "\n".join(lines)

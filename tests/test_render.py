@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from woodpecker import render
 from woodpecker.models import STATUS_PENDING, Task
+from woodpecker.vault import VaultTask
 
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 4, 12, tzinfo=TZ)  # a Saturday
@@ -185,3 +186,69 @@ def test_render_matters_lists_shown_and_summarizes_the_rest():
 def test_render_matters_no_priority_tasks_is_all_summary():
     text = render.render_matters([_task(id=1, priority=0, deadline=NOW.date())], NOW)
     assert "+ 1 more" in text
+
+
+VAULT_TODAY = date(2026, 10, 8)
+
+
+def test_legends():
+    assert render.FROG_LEGEND == "d done · o on it · t tomorrow · x drop"
+    assert render.REFRAME_LEGEND == "s smaller step · n not mine to do · x drop"
+
+
+def test_vault_block_exact_text():
+    tasks = [
+        VaultTask(text="call the bank", note="Money", due=date(2026, 10, 6), now=False),
+        VaultTask(text="file the return", note="Taxes", due=date(2026, 10, 19), now=True),
+        VaultTask(text="book the service", note="Car", due=None, now=True),
+    ]
+    assert render.render_vault_block(tasks, VAULT_TODAY) == (
+        "From the vault:\n"
+        "• call the bank (overdue, Money)\n"
+        "• file the return (📅 2026-10-19, Taxes)\n"
+        "• book the service (Car)\n"
+        "Tick these in Obsidian."
+    )
+
+
+def test_vault_block_due_today_shows_the_date():
+    tasks = [VaultTask(text="pay rent", note="Home", due=VAULT_TODAY, now=False)]
+    assert "• pay rent (📅 2026-10-08, Home)" in render.render_vault_block(tasks, VAULT_TODAY)
+
+
+def test_vault_block_empty_is_empty():
+    assert render.render_vault_block([], VAULT_TODAY) == ""
+    assert render.render_vault_due([], VAULT_TODAY) == ""
+
+
+def test_vault_due_exact_text():
+    tasks = [VaultTask(text="pay rent", note="Home", due=VAULT_TODAY, now=False)]
+    assert render.render_vault_due(tasks, VAULT_TODAY) == (
+        "Due in the vault today:\n• pay rent (📅 2026-10-08, Home)\nTick these in Obsidian."
+    )
+
+
+def test_vault_unreadable():
+    assert render.render_vault_unreadable("not a folder") == "Vault: not readable (not a folder)"
+
+
+def test_checkin_text():
+    task = _task(1)
+    assert render.render_checkin(task, started=False, legend=render.FROG_LEGEND) == (
+        'Still on for "task 1" today?\nd done · o on it · t tomorrow · x drop'
+    )
+    assert render.render_checkin(task, started=True, legend=render.FROG_LEGEND).startswith(
+        'How is "task 1" going?\n'
+    )
+
+
+def test_weekly_review_text():
+    old = _task(1, created_at=NOW - timedelta(days=30))
+    older = _task(2, created_at=NOW - timedelta(days=45))
+    assert render.render_weekly_review([older, old], NOW) == (
+        "Weekly review: these have waited 14 days or more.\n"
+        "1. task 2 (45d)\n"
+        "2. task 1 (30d)\n"
+        "\n"
+        "Reply like x 1 3 to drop 1 and 3, w 2 to move 2 to next week. The rest stay."
+    )
