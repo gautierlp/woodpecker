@@ -367,6 +367,13 @@ def test_handle_start_replies_with_welcome():
     assert "Woodpecker" in update.message.reply_text.call_args.args[0]
 
 
+def test_welcome_describes_the_morning_rhythm():
+    assert "louder" not in bot.WELCOME
+    assert "Each morning I name one thing and a first step" in bot.WELCOME
+    assert "answer with one letter" in bot.WELCOME
+    assert "\u2014" not in bot.WELCOME
+
+
 def test_handle_start_ignores_foreign_chat():
     update = make_update("/start", chat_id=999)
     context = make_context(fresh(), chat_id=42)

@@ -7,13 +7,13 @@ logger = logging.getLogger(__name__)
 
 WELCOME = (
     "Hey, I'm Woodpecker. Tell me what you need to do and I'll hold it for you. "
-    "I'll point you at one thing each day and get louder about anything you keep "
-    'dodging. Just type tasks in plain language, like "call the vet tomorrow".'
+    "Each morning I name one thing and a first step; answer with one letter. "
+    'Just type tasks in plain language, like "call the vet tomorrow".'
 )
 
 
 def make_recording_send(send, memory, chat_id):
-    """Wrap the raw send so every message Woodpecker initiates (nags, daily focus) is
+    """Wrap the raw send so every message Woodpecker initiates (morning, check-in, review) is
     remembered as the chat's pending outbound before going out. That lets a later
     reply like "done" be resolved against the nag it answers."""
 

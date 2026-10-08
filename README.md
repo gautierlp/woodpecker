@@ -84,7 +84,7 @@ It stays quiet from 23:00 to 6:00.
 
 * [![Python][python-shield]][python-url]
 * [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) for the chat
-* [Claude](https://www.anthropic.com/claude) (Haiku 4.5) to read your messages and write the nags
+* [Claude](https://www.anthropic.com/claude) (Haiku 4.5) to read your messages and write the morning first step
 * [Vikunja](https://vikunja.io/) as the task store, over its REST API
 * APScheduler for the 9 am morning, the 2 pm check-in and the Sunday review
 * SQLite for the bot's own state (when it last nagged, the last list it showed you)

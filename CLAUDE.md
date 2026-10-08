@@ -4,11 +4,11 @@
 Decisions with their reason and logs of what was done go to that vault folder (never run git there); code docs, specs and plans stay in this repo.
 
 Telegram bot **woodpecker** (called Jolt until 2026-10-05) that fights task avoidance. Holds a personal backlog, nudges toward one
-focused thing each day, and gets pointedly insistent about tasks that have been quietly
-postponed. Plain-language interface powered by Claude.
+focused thing each day, and asks whether a task that keeps moving to tomorrow is too big
+or not yours to do. Plain-language interface powered by Claude.
 
 Private single-user project, not a SaaS. Built to break a specific personal loop
-(postpone, guilt, paralysis), so it leans into persistent nagging by design.
+(postpone, guilt, paralysis), so it sends few messages, each one sharp, by design.
 
 **Status: deployed and running, now backed by Vikunja.** The full app (bot, LLM,
 tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy workflow
@@ -34,9 +34,10 @@ live to Vikunja.
 
 External services:
 - **Vikunja API**: the task backlog (create, list open, get, mark done, delete)
-- **Telegram API**: messaging (receive user texts, send daily focus and nags)
-- **Anthropic API**: Claude interprets each inbound message and writes the focus,
-  nags, and replies
+- **Telegram API**: messaging (receive user texts, send the morning, check-in and
+  weekly review)
+- **Anthropic API**: Claude interprets each inbound message and writes the morning
+  first step, the reframe question, and replies
 
 ### Rhythm
 
@@ -55,9 +56,9 @@ at 10:00 a weekly review lists up to 5 tasks pending 14 days or more; replies lo
 
 - **Claude** handles anything needing judgment or tone: parsing a text into a task,
   classifying intent (add / complete / drop / list / answer), and writing the
-  daily focus, the nags, and the curious/escalating avoidance messages.
+  morning frog line with its first step and the reframe question after the third `t`.
 - **Deterministic code** handles anything mechanical: the full backlog dump, the
-  stale-age calculation, priority ordering, quiet-hours enforcement, and scheduling.
+  letter replies, the vault block, the stale-age calculation, priority ordering, quiet-hours enforcement, and scheduling.
 
 The full-backlog dump is never sent through Claude. A mechanical list must never be
 reworded, reordered, or hallucinated, and it is cheaper as plain code.
@@ -85,8 +86,9 @@ Key libraries:
 - Commits: conventional style (`feat(...)`, `fix(...)`), concise.
 - No over-engineering: single-user personal project. No abstractions for hypothetical
   future needs.
-- Behavior tunables (stale threshold = 3 days, quiet hours = 06:00 to 23:00) are single
-  named constants, easy to change after living with the bot.
+- Behavior tunables (weekly review threshold = 14 days, reframe after 3 `t`,
+  quiet hours = 06:00 to 23:00) are single named constants in `config.py`, easy to
+  change after living with the bot.
 
 ## Module Responsibilities
 
@@ -95,7 +97,7 @@ Following the `billie_bot` shape:
 ```
 src/woodpecker/
   main.py         Entry point: wires up bot + scheduler, builds the clients, starts the app
-  bot.py          Telegram handler: receives messages, sends replies and nags
+  bot.py          Telegram handler: receives messages, sends replies
   llm.py          Anthropic client: interprets messages, classifies intent, writes text
   orchestrator.py Applies a parsed intent (via the Store) and returns the reply text
   selection.py    Pure rules: the frog, the weekly stale list, the vault reminders, quiet hours
@@ -107,7 +109,8 @@ src/woodpecker/
   vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
                   the Task <-> Vikunja JSON field mapping
   sidecar.py      SQLite access for Woodpecker's own state: the nag_state, display_snapshot,
-                  bump_state, frog_state and open_prompt tables (no task data)
+                  bump_state, frog_state and open_prompt tables (no task data); open_prompt
+                  has a frog slot and a weekly slot
   store.py        Store: the storage seam the rest of Woodpecker talks to. Combines a
                   VikunjaClient (task data) and the sidecar connection (nag state,
                   display snapshot) behind one interface returning Task
