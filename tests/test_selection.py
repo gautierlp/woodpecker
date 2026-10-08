@@ -8,6 +8,7 @@ from woodpecker.models import (
     STATUS_PENDING,
     Task,
 )
+from woodpecker.vault import VaultTask
 
 TZ = ZoneInfo("Europe/Paris")
 NOW = datetime(2026, 7, 12, 8, tzinfo=TZ)
@@ -236,41 +237,79 @@ def test_slow_resurface_eligible_at_exactly_the_cadence_boundary():
     assert selection.select_slow_resurface([task], now) is task
 
 
-def test_select_frog_picks_highest_bump_count():
-    a = replace(make(1, priority=3, created=NOW - timedelta(days=2)), bump_count=1)
-    b = replace(make(2, priority=3, created=NOW - timedelta(days=2)), bump_count=4)
-    a = replace(a, deadline=NOW.date())
-    b = replace(b, deadline=NOW.date())
-    assert selection.select_frog([a, b], NOW).id == 2
+def test_frog_from_priority_zero_undated_tasks():
+    task = make(1, priority=0, deadline=None)
+    assert selection.select_frog([task], NOW) is task
 
 
-def test_select_frog_tie_on_bumps_breaks_by_priority_then_age():
-    older_low = replace(make(1, priority=2, created=NOW - timedelta(days=9)), bump_count=3)
-    newer_high = replace(make(2, priority=4, created=NOW - timedelta(days=1)), bump_count=3)
-    older_low = replace(older_low, deadline=NOW.date())
-    newer_high = replace(newer_high, deadline=NOW.date())
-    assert selection.select_frog([older_low, newer_high], NOW).id == 2
+def test_frog_overdue_beats_bumped():
+    overdue = make(1, deadline=NOW.date() - timedelta(days=1))
+    bumped = replace(make(2), bump_count=5)
+    assert selection.select_frog([bumped, overdue], NOW).id == 1
 
 
-def test_select_frog_day_one_fallback_to_top_priority_due_now():
-    # No bumps yet: fall back to the highest-priority eligible task due today/overdue.
-    high_due = replace(make(1, priority=4), deadline=NOW.date())
-    mid_due = replace(make(2, priority=2), deadline=NOW.date())
-    assert selection.select_frog([high_due, mid_due], NOW).id == 1
+def test_frog_bumped_beats_old():
+    old = make(1, created=NOW - timedelta(days=60))
+    bumped = replace(make(2, created=NOW - timedelta(days=1)), bump_count=1)
+    assert selection.select_frog([old, bumped], NOW).id == 2
 
 
-def test_select_frog_excludes_low_priority_and_undated():
-    low = replace(make(1, priority=1), deadline=NOW.date())  # below the cutoff
-    undated_high = make(2, priority=4)  # eligible priority but no due date
-    assert selection.select_frog([low, undated_high], NOW) is None
+def test_frog_oldest_wins_a_tie():
+    newer = make(1, created=NOW - timedelta(days=2))
+    older = make(2, created=NOW - timedelta(days=9))
+    assert selection.select_frog([newer, older], NOW).id == 2
 
 
-def test_select_frog_none_when_no_eligible_tasks():
-    assert selection.select_frog([make(1, priority=0)], NOW) is None
+def test_frog_due_today_is_not_overdue():
+    today = make(1, deadline=NOW.date(), created=NOW - timedelta(days=1))
+    bumped = replace(make(2, created=NOW - timedelta(days=1)), bump_count=2)
+    assert selection.select_frog([today, bumped], NOW).id == 2
 
 
-def test_select_frog_none_when_no_bumps_and_nothing_due_yet():
-    # No task has been bumped and nothing is due today/overdue: no frog, even though a
-    # future-dated priority task is eligible.
-    future = replace(make(1, priority=4), deadline=NOW.date() + timedelta(days=3))
-    assert selection.select_frog([future], NOW) is None
+def test_frog_empty_backlog_is_none():
+    assert selection.select_frog([], NOW) is None
+    assert selection.select_frog([make(1, status=STATUS_DONE)], NOW) is None
+
+
+def test_stale_review_keeps_14_days_and_more_oldest_first():
+    at_14 = make(1, created=NOW - timedelta(days=14))
+    at_13 = make(2, created=NOW - timedelta(days=13))
+    at_40 = make(3, created=NOW - timedelta(days=40))
+    got = selection.select_stale_for_review([at_14, at_13, at_40], NOW)
+    assert [t.id for t in got] == [3, 1]
+
+
+def test_stale_review_limit():
+    tasks = [make(i, created=NOW - timedelta(days=20 + i)) for i in range(1, 8)]
+    got = selection.select_stale_for_review(tasks, NOW, limit=5)
+    assert [t.id for t in got] == [7, 6, 5, 4, 3]
+
+
+def _vt(text, due=None, now=False, note="n"):
+    return VaultTask(text=text, note=note, due=due, now=now)
+
+
+def test_vault_reminders_windows():
+    today = date(2026, 10, 8)
+    tasks = [
+        _vt("overdue", due=today - timedelta(days=2)),
+        _vt("today", due=today),
+        _vt("day7", due=today + timedelta(days=7)),
+        _vt("day8", due=today + timedelta(days=8)),
+        _vt("thisweek", now=True),
+        _vt("undated"),
+    ]
+    got = selection.select_vault_reminders(tasks, today)
+    assert [t.text for t in got] == ["overdue", "today", "day7", "thisweek"]
+
+
+def test_vault_due_is_today_and_overdue_only():
+    today = date(2026, 10, 8)
+    tasks = [
+        _vt("tomorrow", due=today + timedelta(days=1)),
+        _vt("today", due=today),
+        _vt("overdue", due=today - timedelta(days=3)),
+        _vt("thisweek", now=True),
+    ]
+    got = selection.select_vault_due(tasks, today)
+    assert [t.text for t in got] == ["overdue", "today"]
