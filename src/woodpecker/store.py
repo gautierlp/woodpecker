@@ -73,3 +73,40 @@ class Store:
 
     def load_display(self, chat_id: int) -> list[int] | None:
         return sidecar.load_display(self._conn, chat_id)
+
+    def rename_task(self, task_id: int, text: str) -> Task | None:
+        """Rewrite the title in place (same task_id, so the bump history stays)."""
+        task = self._vk.get_task(task_id)
+        if task is None or task.status == STATUS_DONE:
+            return None
+        return self._vk.update_task(task_id, text=text)
+
+    def record_frog(self, day: date, task_id: int) -> None:
+        sidecar.record_frog(self._conn, day, task_id)
+
+    def frog_of_day(self, day: date) -> sidecar.FrogDay | None:
+        return sidecar.frog_of_day(self._conn, day)
+
+    def mark_frog_started(self, day: date, when: datetime) -> None:
+        sidecar.mark_frog_started(self._conn, day, when)
+
+    def mark_frog_answered(self, day: date, letter: str) -> None:
+        sidecar.mark_frog_answered(self._conn, day, letter)
+
+    def tomorrow_count(self, task_id: int) -> int:
+        return sidecar.tomorrow_count(self._conn, task_id)
+
+    def clear_tomorrows(self, task_id: int) -> None:
+        sidecar.clear_tomorrows(self._conn, task_id)
+
+    def set_open_prompt(self, kind: str, task_ids: list[int], when: datetime) -> None:
+        sidecar.set_open_prompt(self._conn, kind, task_ids, when)
+
+    def get_open_prompt(self) -> sidecar.OpenPrompt | None:
+        return sidecar.get_open_prompt(self._conn)
+
+    def set_pending_drop(self, when: datetime | None) -> None:
+        sidecar.set_pending_drop(self._conn, when)
+
+    def clear_open_prompt(self) -> None:
+        sidecar.clear_open_prompt(self._conn)

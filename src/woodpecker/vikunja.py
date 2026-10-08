@@ -276,9 +276,13 @@ class VikunjaClient:
         return vikunja_to_task(resp.json()) if resp is not None else None
 
     def update_task(
-        self, task_id: int, deadline: date | None = None, priority: str | None = None
+        self,
+        task_id: int,
+        deadline: date | None = None,
+        priority: str | None = None,
+        text: str | None = None,
     ) -> Task | None:
-        """Change an existing task's due date and/or priority in place. An argument left at
+        """Change an existing task's due date, priority and/or title in place. An argument left at
         None means "leave that field as it is", so this never clears a date the user did not
         ask to clear. Read-modify-write like mark_done: Vikunja's POST replaces the object,
         so the stored task is round-tripped with only the named fields overwritten."""
@@ -290,6 +294,8 @@ class VikunjaClient:
             raw["due_date"] = _due_for(deadline)
         if priority is not None:
             raw["priority"] = PRIORITY_IMPORTANT_VALUE if priority == PRIORITY_IMPORTANT else 0
+        if text is not None:
+            raw["title"] = text
         resp = self._request("POST", f"/api/v1/tasks/{task_id}", json=raw)
         return vikunja_to_task(resp.json()) if resp is not None else None
 

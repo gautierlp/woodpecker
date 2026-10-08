@@ -47,7 +47,7 @@ class FakeVikunja:
             return True
         return False
 
-    def update_task(self, task_id, deadline=None, priority=None):
+    def update_task(self, task_id, deadline=None, priority=None, text=None):
         t = self._tasks.get(task_id)
         if t is None:
             return None
@@ -56,6 +56,8 @@ class FakeVikunja:
             over["deadline"] = deadline
         if priority is not None:
             over["priority"] = priority
+        if text is not None:
+            over["text"] = text
         updated = Task(**{**t.__dict__, **over})
         self._tasks[task_id] = updated
         return updated
@@ -197,3 +199,24 @@ def test_pulling_a_due_date_earlier_does_not_count_a_bump():
     assert s.list_pending()[0].bump_count == 0
     s.reschedule_task(1, deadline=date(2026, 7, 28), priority=None)
     assert s.list_pending()[0].bump_count == 0
+
+
+def test_store_rename_task():
+    s, _ = _store(FakeVikunja([_task(1)]))
+    task = s.rename_task(1, "smaller step")
+    assert task.text == "smaller step"
+    assert s.get_task(1).text == "smaller step"
+
+
+def test_store_frog_and_prompt_state():
+    s, _ = _store(FakeVikunja([_task(1)]))
+    day = date(2026, 10, 8)
+    at = datetime(2026, 10, 8, 9, tzinfo=timezone.utc)
+    s.record_frog(day, 1)
+    s.mark_frog_answered(day, "t")
+    assert s.tomorrow_count(1) == 1
+    assert s.frog_of_day(day).answered == "t"
+    s.set_open_prompt("frog", [1], at)
+    assert s.get_open_prompt().task_ids == [1]
+    s.clear_open_prompt()
+    assert s.get_open_prompt() is None

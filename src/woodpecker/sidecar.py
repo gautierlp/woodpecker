@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime
 
 _NAG_SCHEMA = """
@@ -23,6 +24,49 @@ CREATE TABLE IF NOT EXISTS bump_state (
 );
 """
 
+# One row per day: the frog the morning named, and what happened to it. The check-in
+# reads it, and the count of days with "t" drives the reframe question.
+_FROG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS frog_state (
+    day TEXT PRIMARY KEY,
+    task_id INTEGER NOT NULL,
+    started_at TEXT,
+    answered TEXT
+);
+"""
+
+# The one prompt a letter reply answers: the last frog, reframe, weekly or step prompt
+# the bot sent. A single row (id = 1); a new prompt replaces it.
+_PROMPT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS open_prompt (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    kind TEXT NOT NULL,
+    task_ids TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    pending_drop_at TEXT
+);
+"""
+
+
+@dataclass(frozen=True)
+class FrogDay:
+    day: date
+    task_id: int
+    started_at: datetime | None
+    answered: str | None  # the closing letter: d, t, x or n
+
+
+@dataclass(frozen=True)
+class OpenPrompt:
+    kind: str  # replies.FROG, REFRAME, WEEKLY or STEP
+    task_ids: list[int]
+    sent_at: datetime
+    pending_drop_at: datetime | None  # set by a first "x" or "n"
+
+
+def _when(raw: str | None) -> datetime | None:
+    return datetime.fromisoformat(raw) if raw else None
+
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
@@ -34,6 +78,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute(_NAG_SCHEMA)
     conn.execute(_DISPLAY_SCHEMA)
     conn.execute(_BUMP_SCHEMA)
+    conn.execute(_FROG_SCHEMA)
+    conn.execute(_PROMPT_SCHEMA)
     conn.commit()
 
 
@@ -114,4 +160,90 @@ def prune(conn: sqlite3.Connection, live_ids: set[int]) -> None:
         stale = ids - live_ids
         if stale:
             conn.executemany(f"DELETE FROM {table} WHERE task_id = ?", [(i,) for i in stale])
+    conn.commit()
+
+
+def record_frog(conn: sqlite3.Connection, day: date, task_id: int) -> None:
+    conn.execute(
+        "INSERT INTO frog_state (day, task_id) VALUES (?, ?) "
+        "ON CONFLICT(day) DO UPDATE SET task_id = excluded.task_id",
+        (day.isoformat(), task_id),
+    )
+    conn.commit()
+
+
+def frog_of_day(conn: sqlite3.Connection, day: date) -> FrogDay | None:
+    row = conn.execute("SELECT * FROM frog_state WHERE day = ?", (day.isoformat(),)).fetchone()
+    if row is None:
+        return None
+    return FrogDay(
+        day=date.fromisoformat(row["day"]),
+        task_id=row["task_id"],
+        started_at=_when(row["started_at"]),
+        answered=row["answered"],
+    )
+
+
+def mark_frog_started(conn: sqlite3.Connection, day: date, when: datetime) -> None:
+    conn.execute(
+        "UPDATE frog_state SET started_at = ? WHERE day = ?", (when.isoformat(), day.isoformat())
+    )
+    conn.commit()
+
+
+def mark_frog_answered(conn: sqlite3.Connection, day: date, letter: str) -> None:
+    conn.execute("UPDATE frog_state SET answered = ? WHERE day = ?", (letter, day.isoformat()))
+    conn.commit()
+
+
+def tomorrow_count(conn: sqlite3.Connection, task_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM frog_state WHERE task_id = ? AND answered = 't'", (task_id,)
+    ).fetchone()
+    return row["n"]
+
+
+def clear_tomorrows(conn: sqlite3.Connection, task_id: int) -> None:
+    # A rewritten task starts its "t" count again, so it is not reframed the next morning.
+    conn.execute(
+        "UPDATE frog_state SET answered = NULL WHERE task_id = ? AND answered = 't'", (task_id,)
+    )
+    conn.commit()
+
+
+def set_open_prompt(
+    conn: sqlite3.Connection, kind: str, task_ids: list[int], when: datetime
+) -> None:
+    conn.execute(
+        "INSERT INTO open_prompt (id, kind, task_ids, sent_at, pending_drop_at) "
+        "VALUES (1, ?, ?, ?, NULL) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, "
+        "task_ids = excluded.task_ids, sent_at = excluded.sent_at, pending_drop_at = NULL",
+        (kind, ",".join(str(i) for i in task_ids), when.isoformat()),
+    )
+    conn.commit()
+
+
+def get_open_prompt(conn: sqlite3.Connection) -> OpenPrompt | None:
+    row = conn.execute("SELECT * FROM open_prompt WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    raw = row["task_ids"]
+    return OpenPrompt(
+        kind=row["kind"],
+        task_ids=[int(part) for part in raw.split(",")] if raw else [],
+        sent_at=datetime.fromisoformat(row["sent_at"]),
+        pending_drop_at=_when(row["pending_drop_at"]),
+    )
+
+
+def set_pending_drop(conn: sqlite3.Connection, when: datetime | None) -> None:
+    conn.execute(
+        "UPDATE open_prompt SET pending_drop_at = ? WHERE id = 1",
+        (when.isoformat() if when else None,),
+    )
+    conn.commit()
+
+
+def clear_open_prompt(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM open_prompt")
     conn.commit()

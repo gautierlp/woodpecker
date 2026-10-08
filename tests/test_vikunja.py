@@ -504,3 +504,18 @@ def test_update_task_with_nothing_to_change_leaves_the_task_alone():
 def test_update_task_returns_none_when_task_missing():
     c = _client(lambda r: httpx.Response(404, json={"message": "not found"}))
     assert c.update_task(5, deadline=date(2026, 7, 30)) is None
+
+
+def test_update_task_rewrites_the_title_and_keeps_the_due_date():
+    seen = {}
+    existing = {
+        "id": 5,
+        "title": "Book the doctor",
+        "priority": 0,
+        "due_date": "2026-07-29T21:59:59Z",
+        "done": False,
+    }
+    task = _client(_update_handler(seen, existing)).update_task(5, text="Open the Doctolib page")
+    assert seen["post_body"]["title"] == "Open the Doctolib page"
+    assert seen["post_body"]["due_date"] == "2026-07-29T21:59:59Z"
+    assert task.text == "Open the Doctolib page"
