@@ -355,22 +355,23 @@ def _text_of(response) -> str:
     return _EMPTY_REPLY_FALLBACK
 
 
-def write_focus(frog: Task | None, now: datetime, client) -> str:
-    if frog is None:
-        return "Nothing high-priority is on the hook today. Use the breathing room."
-    age = (now - frog.created_at).days
-    duration = _format_duration(frog.estimate_seconds)
+_NO_EM_DASH = (
+    "Never use em dashes; use a comma, a colon, or a period instead. This rule has no exceptions."
+)
+
+
+def write_focus(frog: Task, now: datetime, client) -> str:
+    """The morning lead: the frog in plain words plus one first step that takes under 10
+    minutes. No guilt and no count of days avoided: guilt made Gautier close the message."""
     system = (
-        "You are Woodpecker. Write a short morning message (2 to 4 lines) about the ONE task below, "
-        "the single thing to attack today. Push to start it: name the blocker and a concrete "
-        "small first step. If it has been pushed forward before, call that out plainly and get "
-        "more insistent the more it has slipped. Be direct, never guilt-tripping. "
-        "Never use em dashes; use a comma, a colon, or a period instead. This rule has no "
-        "exceptions."
+        "You are Woodpecker. Write exactly two short lines about the ONE task below. "
+        "Line 1: name the task plainly as today's one thing. "
+        "Line 2: start with 'First step:' and give one concrete action that takes under "
+        "10 minutes, for example 'open the Doctolib page', not 'book the doctor'. "
+        "No guilt, no count of days, no mention of how often it was put off. " + _NO_EM_DASH
     )
-    bits = [f"Focus task: {frog.text}", f"priority {_importance(frog)}", f"{age}d old"]
-    if frog.bump_count:
-        bits.append(f"due date pushed forward {frog.bump_count} time(s)")
+    bits = [f"Task: {frog.text}"]
+    duration = _format_duration(frog.estimate_seconds)
     if duration:
         bits.append(f"est {duration}")
     if frog.project_name:
@@ -379,11 +380,30 @@ def write_focus(frog: Task | None, now: datetime, client) -> str:
     user = ", ".join(bits) + "." + details_line
     response = client.messages.create(
         model=config.MODEL,
-        max_tokens=300,
+        max_tokens=200,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
     _log_usage("write_focus", response)
+    return _text_of(response)
+
+
+def write_reframe(frog: Task, client) -> str:
+    """The question for a frog moved to tomorrow REFRAME_AFTER_BUMPS times: the task is
+    probably wrong as written, so ask about its size or its owner instead of nagging."""
+    system = (
+        "You are Woodpecker. The task below was moved to tomorrow three times. Write one or "
+        "two short lines, without blame, that ask whether it is too big as written or not "
+        "really the user's to do. Do not list options: the bot adds them after your text. "
+        + _NO_EM_DASH
+    )
+    response = client.messages.create(
+        model=config.MODEL,
+        max_tokens=150,
+        system=system,
+        messages=[{"role": "user", "content": f"Task: {frog.text}."}],
+    )
+    _log_usage("write_reframe", response)
     return _text_of(response)
 
 

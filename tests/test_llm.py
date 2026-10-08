@@ -457,22 +457,6 @@ def test_write_nag_passes_importance_to_prompt():
     assert "important" in str(client.messages.calls[0]).lower()
 
 
-def test_write_focus_leads_on_the_frog_and_names_the_bump_count():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
-    frog = replace(_high_task(estimate_seconds=7200, project_name="Backlog"), bump_count=4)
-    llm.write_focus(frog, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
-    payload = str(client.messages.calls[0]).lower()
-    assert "4" in payload  # the bump count is surfaced
-    assert "backlog" in payload
-
-
-def test_write_focus_handles_no_frog():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
-    out = llm.write_focus(None, datetime(2026, 7, 12, 6, tzinfo=TZ), client)
-    assert isinstance(out, str) and out
-    assert client.messages.calls == []  # no Claude call when there is nothing to lead on
-
-
 def test_write_nag_returns_text():
     text_block = SimpleNamespace(type="text", text="Still the taxes. Two minutes. Go.")
     client = FakeClient(SimpleNamespace(content=[text_block]))
@@ -731,3 +715,35 @@ def test_reschedule_out_of_range_position_becomes_a_clarification():
     assert resolved[0].action == "answer"
     assert "45" in resolved[0].reply
     assert resolved[0].task_id is None
+
+
+def _ok_client():
+    return FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")]))
+
+
+def test_write_focus_asks_for_a_small_first_step_without_guilt():
+    client = _ok_client()
+    frog = replace(_high_task(estimate_seconds=7200, project_name="Backlog"), bump_count=4)
+    out = llm.write_focus(frog, datetime(2026, 10, 8, 9, tzinfo=TZ), client)
+    assert out == "ok"
+    call = client.messages.calls[0]
+    system = call["system"].lower()
+    assert "first step:" in system
+    assert "10 minutes" in system
+    assert "no guilt" in system
+    assert "em dash" in system
+    user = call["messages"][0]["content"]
+    assert frog.text in user
+    assert "d old" not in user
+    assert "pushed forward" not in user
+
+
+def test_write_reframe_asks_size_or_owner():
+    client = _ok_client()
+    out = llm.write_reframe(_task(), client)
+    assert out == "ok"
+    call = client.messages.calls[0]
+    assert "taxes" in call["messages"][0]["content"]
+    system = call["system"].lower()
+    assert "the bot adds" in system
+    assert "em dash" in system
