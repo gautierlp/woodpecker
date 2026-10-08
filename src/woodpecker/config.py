@@ -3,21 +3,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 STALE_THRESHOLD_DAYS = 3
-SLOW_RESURFACE_DAYS = 7  # a waved-off normal, stale task is re-poked at most once this often
 QUIET_START_HOUR = 6  # first hour of the day pings are allowed
 QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
-NAG_HOURS = (9, 13, 19)
 # Priority bands derived from the raw Vikunja priority (0-5). High pushes hard, Mid gets a
 # gentle poke, Low/unset gets nudged toward dropping. See selection.priority_band.
 PRIORITY_HIGH_MIN = 3  # priority >= 3 -> high band
 PRIORITY_MID_MIN = 1  # priority 1-2 -> mid band; 0 -> low band
-# The morning message and the frog only consider tasks at or above this raw priority
-# (2 = Medium and up: Medium, High, Urgent, Critical). Low (1) and unset (0) are excluded.
-MATTERS_MIN_PRIORITY = 2
-LONG_DURATION_SECONDS = (
-    3600  # nags treat an estimate >= this as "long" (block time, not "just do it")
-)
-DAILY_FOCUS_HOUR = 6
 # The nudge rhythm (spec 2026-10-08): one morning message, one check-in, one weekly review.
 FOCUS_HOUR = 9
 CHECKIN_HOUR = 14

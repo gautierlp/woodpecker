@@ -66,8 +66,8 @@ def _make_send(application, chat_id):
     return send
 
 
-def build_scheduler(store, send, client, chat_id) -> AsyncIOScheduler:
-    """Build the cron scheduler for the daily focus and nags.
+def build_scheduler(store, send, client, vault_path) -> AsyncIOScheduler:
+    """Build the cron scheduler: the morning message, the check-in, the weekly review.
 
     The jobs are coroutines on purpose: AsyncIOScheduler runs coroutine jobs on the
     bot's own asyncio event loop, the same thread that owns the sidecar connection and
@@ -76,20 +76,30 @@ def build_scheduler(store, send, client, chat_id) -> AsyncIOScheduler:
     for the send, so every scheduled message crashed silently."""
     sched = AsyncIOScheduler(timezone=config.TIMEZONE)
 
-    async def _daily_focus():
-        scheduler.send_daily_focus(store, send, client, config.now_paris(), chat_id)
+    async def _morning():
+        scheduler.send_morning(store, send, client, config.now_paris(), vault_path)
 
-    async def _nags():
-        scheduler.send_nags(store, send, client, config.now_paris())
+    async def _checkin():
+        scheduler.send_checkin(store, send, config.now_paris(), vault_path)
+
+    async def _weekly():
+        scheduler.send_weekly_review(store, send, config.now_paris())
 
     # Pass the timezone to every CronTrigger explicitly. APScheduler does NOT stamp the
     # scheduler's timezone onto a trigger; a trigger built without one defaults to the
     # machine's local zone (UTC in the container), so every job fired 2 hours off Paris.
+    tz = config.TIMEZONE
+    sched.add_job(_morning, CronTrigger(hour=config.FOCUS_HOUR, minute=0, timezone=tz))
+    sched.add_job(_checkin, CronTrigger(hour=config.CHECKIN_HOUR, minute=0, timezone=tz))
     sched.add_job(
-        _daily_focus, CronTrigger(hour=config.DAILY_FOCUS_HOUR, minute=0, timezone=config.TIMEZONE)
+        _weekly,
+        CronTrigger(
+            day_of_week=config.WEEKLY_REVIEW_DAY,
+            hour=config.WEEKLY_REVIEW_HOUR,
+            minute=0,
+            timezone=tz,
+        ),
     )
-    for nag_hour in config.NAG_HOURS:
-        sched.add_job(_nags, CronTrigger(hour=nag_hour, minute=0, timezone=config.TIMEZONE))
     return sched
 
 
@@ -115,13 +125,17 @@ def main() -> None:
         # AsyncIOScheduler binds to the bot's running loop: the jobs then execute on the
         # same thread that owns the sidecar connection and the Telegram send.
         send = bot.make_recording_send(_make_send(application, chat_id), memory, chat_id)
-        sched = build_scheduler(store, send, client, chat_id)
+        sched = build_scheduler(store, send, client, config.vault_path())
         sched.start()
         application.bot_data["scheduler"] = sched
         logger.info(
-            "Scheduler started: daily focus at %02d:00, nags at %s",
-            config.DAILY_FOCUS_HOUR,
-            ", ".join(f"{h:02d}:00" for h in config.NAG_HOURS),
+            "Scheduler started: morning at %02d:00, check-in at %02d:00, review %s %02d:00, "
+            "vault at %s",
+            config.FOCUS_HOUR,
+            config.CHECKIN_HOUR,
+            config.WEEKLY_REVIEW_DAY,
+            config.WEEKLY_REVIEW_HOUR,
+            config.vault_path(),
         )
 
     application = Application.builder().token(config.telegram_token()).post_init(_post_init).build()

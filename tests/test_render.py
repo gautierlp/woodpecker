@@ -26,7 +26,7 @@ def make(id, *, text, priority=0, deadline=None, created_at=FRESH, position=0):
 
 
 def _task(id, *, priority=0, deadline=None, created_at=FRESH, position=0):
-    # morning_shown/render_matters tests care about priority/deadline, not the text.
+    # A fixed text per id, so tests can name a task by its id.
     return make(
         id,
         text=f"task {id}",
@@ -152,40 +152,6 @@ def test_later_line_shows_month_and_day():
 
 def test_no_deadline_line_has_no_date_suffix():
     assert task_line(make(1, text="a")) == "1. a"
-
-
-def test_morning_shown_only_priority_due_today_or_overdue():
-    today = NOW.date()
-    shown = render.morning_shown(
-        [
-            _task(id=1, priority=4, deadline=today),  # in: urgent, due today
-            _task(id=2, priority=2, deadline=today - timedelta(days=2)),  # in: overdue
-            _task(id=3, priority=1, deadline=today),  # out: below cutoff
-            _task(id=4, priority=3, deadline=today + timedelta(days=3)),  # out: future
-            _task(id=5, priority=5, deadline=None),  # out: no due date
-        ],
-        NOW,
-    )
-    assert [t.id for t in shown] == [2, 1]  # overdue first, then today
-
-
-def test_render_matters_lists_shown_and_summarizes_the_rest():
-    today = NOW.date()
-    text = render.render_matters(
-        [
-            _task(id=1, priority=4, deadline=today),
-            _task(id=3, priority=1, deadline=today),  # hidden
-            _task(id=5, priority=0, deadline=None),  # hidden
-        ],
-        NOW,
-    )
-    assert "1." in text
-    assert "+ 2 more" in text  # two hidden tasks summarized, not listed
-
-
-def test_render_matters_no_priority_tasks_is_all_summary():
-    text = render.render_matters([_task(id=1, priority=0, deadline=NOW.date())], NOW)
-    assert "+ 1 more" in text
 
 
 VAULT_TODAY = date(2026, 10, 8)

@@ -6,7 +6,7 @@ from anthropic import Anthropic
 
 from . import config, render
 from .models import STATUS_PENDING, Task
-from .selection import BAND_HIGH, BAND_MID, nag_stance, priority_band
+from .selection import BAND_HIGH, priority_band
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +36,6 @@ def _log_usage(label: str, response) -> None:
         output_tokens if output_tokens is not None else "?",
         cost,
     )
-
-
-def _importance(task: Task) -> str:
-    band = priority_band(task)
-    if band == BAND_HIGH:
-        return "important"
-    if band == BAND_MID:
-        return "medium"
-    return "normal"
 
 
 def _format_duration(seconds: int | None) -> str | None:
@@ -404,70 +395,4 @@ def write_reframe(frog: Task, client) -> str:
         messages=[{"role": "user", "content": f"Task: {frog.text}."}],
     )
     _log_usage("write_reframe", response)
-    return _text_of(response)
-
-
-def write_nag(task: Task, now: datetime, client) -> str:
-    age = (now - task.created_at).days
-    stance = nag_stance(task)
-    duration = _format_duration(task.estimate_seconds)
-    if stance == "start":
-        if not task.estimate_seconds:
-            guidance = (
-                "This task matters. Push toward starting it: first ask what is actually blocking "
-                "it and offer to break it down into a small first step. The older it is and the "
-                "later in the day, the blunter and more insistent you get, up to a flat 'do it or "
-                "delete it' by evening."
-            )
-        elif task.estimate_seconds >= config.LONG_DURATION_SECONDS:
-            guidance = (
-                "This task matters and is a big one. Do not say 'just do it'. Push toward a "
-                "small first slice: ask what is blocking it and name a concrete 15-minute first "
-                "step. The older it is and the later in the day, the blunter you get."
-            )
-        else:
-            guidance = (
-                "This task matters and is short. Push to knock it out right now: it is small "
-                "enough to just finish. The later in the day, the blunter and more insistent."
-            )
-    elif stance == "poke":
-        guidance = (
-            "This task is mid-priority. Give it a gentle check-in with no pressure to drop it: "
-            "ask if today is the day for it or offer a small next step. Stay light."
-        )
-    else:
-        guidance = (
-            "This task is low-stakes and has been sitting untouched. Do not chase it. Nudge "
-            "toward dropping it with a zero-based question: if it were not already on the list, "
-            "would they add it today? Still want it, or drop it? Stay easy to wave off."
-        )
-    system = (
-        "You are Woodpecker. Write one short nag (1 to 2 lines) about the task below. "
-        "This message arrives on its own, with no other context on the user's screen, so "
-        "name the specific task you are nudging about (quote it or refer to it clearly) "
-        "rather than assuming the user knows which one you mean. "
-        + guidance
-        + " Never guilt-trip. Never use em dashes; use a comma, a colon, or a "
-        "period instead. This rule has no exceptions."
-    )
-    lines = [
-        f"Task: {task.text}.",
-        f"Importance: {_importance(task)}.",
-        f"Age: {age} days.",
-        f"Current hour: {now.hour}.",
-    ]
-    if duration:
-        lines.append(f"Estimated time: {duration}.")
-    if task.details:
-        lines.append(f"Notes: {task.details}.")
-    if task.project_name:
-        lines.append(f"Project: {task.project_name}.")
-    user = " ".join(lines)
-    response = client.messages.create(
-        model=config.MODEL,
-        max_tokens=200,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    _log_usage("write_nag", response)
     return _text_of(response)

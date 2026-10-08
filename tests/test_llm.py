@@ -300,17 +300,6 @@ def test_pending_nag_not_woven_when_no_history():
     assert messages == [{"role": "user", "content": "what?"}]
 
 
-def test_write_nag_prompt_instructs_naming_the_task():
-    # A nag fires on a schedule, out of any visible context, so it must say which task it
-    # is about. Otherwise "what's blocking you from sending that message?" reads as a
-    # non-sequitur with no antecedent (the real confusion this fixes).
-    text_block = SimpleNamespace(type="text", text="go")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    llm.write_nag(_important_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "name the task" in system or "name the specific task" in system
-
-
 def test_interpret_message_returns_every_task_in_a_multi_task_message():
     # A single message can hold several tasks (a pasted list). Each must come back as
     # its own intent; the old code stopped after the first tool_use block and dropped
@@ -394,19 +383,6 @@ def test_interpret_prompt_instructs_importance_inference():
     assert "importance" in system or "important" in system
 
 
-def _important_task(id=1):
-    return Task(
-        id=id,
-        text="file the tax return",
-        priority=4,
-        deadline=None,
-        created_at=datetime(2026, 7, 3, tzinfo=TZ),
-        status=STATUS_PENDING,
-        last_nagged_at=None,
-        completed_at=None,
-    )
-
-
 def _high_task(id=1, estimate_seconds=None, details="", project_name=""):
     return Task(
         id=id,
@@ -443,25 +419,9 @@ def test_log_usage_handles_missing_usage(caplog):
     # log call; cost is reported as unknown rather than a wrong number.
     response = SimpleNamespace(stop_reason="end_turn", usage=None)
     with caplog.at_level(logging.INFO, logger="woodpecker.llm"):
-        llm._log_usage("write_nag", response)
+        llm._log_usage("write_focus", response)
     message = caplog.records[-1].getMessage()
     assert "cost=?" in message
-
-
-def test_write_nag_passes_importance_to_prompt():
-    # An important + old task must push harder than a normal one, so the prompt has to
-    # know the task is important, not just its age.
-    text_block = SimpleNamespace(type="text", text="go")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    llm.write_nag(_important_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    assert "important" in str(client.messages.calls[0]).lower()
-
-
-def test_write_nag_returns_text():
-    text_block = SimpleNamespace(type="text", text="Still the taxes. Two minutes. Go.")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    out = llm.write_nag(_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    assert "taxes" in out
 
 
 def test_out_of_range_number_becomes_a_clarification():
@@ -486,24 +446,6 @@ def test_in_range_number_still_resolves_to_its_id():
     )
     assert resolved[0].action == "complete"
     assert resolved[0].task_id == 10
-
-
-def test_write_nag_important_is_start_leaning():
-    # An important task's nag pushes toward starting: ask what is blocking it / break it down.
-    text_block = SimpleNamespace(type="text", text="go")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    llm.write_nag(_important_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "blocking" in system or "break it down" in system
-
-
-def test_write_nag_normal_is_drop_leaning():
-    # A low-value task's nag leans toward dropping it with a zero-based question, not scheduling it.
-    text_block = SimpleNamespace(type="text", text="go")
-    client = FakeClient(SimpleNamespace(content=[text_block]))
-    llm.write_nag(_task(), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "drop" in system or "still want" in system or "add it today" in system
 
 
 def test_text_of_falls_back_when_no_text_block():
@@ -615,64 +557,6 @@ def test_format_duration_sub_minute_estimates():
     assert llm._format_duration(30) == "<1 min"
     assert llm._format_duration(59) == "<1 min"
     assert llm._format_duration(60) == "1 min"
-
-
-def test_write_nag_long_high_task_pushes_a_first_step():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(_high_task(estimate_seconds=14400), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    user = str(client.messages.calls[0]["messages"]).lower()
-    assert "first" in system  # break it into a first slice
-    assert "4h" in user  # the estimate is surfaced
-
-
-def test_write_nag_short_high_task_says_knock_it_out():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(_high_task(estimate_seconds=900), datetime(2026, 7, 12, 19, tzinfo=TZ), client)
-    user = str(client.messages.calls[0]["messages"]).lower()
-    assert "15 min" in user
-
-
-def _mid_task(id=1):
-    return Task(
-        id=id,
-        text="reorganize the bookmarks",
-        priority=2,
-        deadline=None,
-        created_at=datetime(2026, 7, 3, tzinfo=TZ),
-        status=STATUS_PENDING,
-        last_nagged_at=None,
-        completed_at=None,
-    )
-
-
-def test_write_nag_mid_task_is_a_gentle_poke():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
-    system = client.messages.calls[0]["system"].lower()
-    assert "gentle" in system or "no pressure" in system or "check in" in system
-
-
-def test_write_nag_mid_task_importance_is_medium_not_normal():
-    # A Mid-band task's Importance line must read "medium", not "normal": the wording
-    # must not contradict the gentle-poke guidance it also receives.
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(_mid_task(), datetime(2026, 7, 12, 13, tzinfo=TZ), client)
-    user = str(client.messages.calls[0]["messages"])
-    assert "Importance: medium." in user
-    assert "Importance: normal." not in user
-
-
-def test_write_nag_includes_description_and_project():
-    client = FakeClient(SimpleNamespace(content=[SimpleNamespace(type="text", text="go")]))
-    llm.write_nag(
-        _high_task(details="the 2025 return on the tax-portal PDF", project_name="Backlog"),
-        datetime(2026, 7, 12, 13, tzinfo=TZ),
-        client,
-    )
-    payload = str(client.messages.calls[0]).lower()
-    assert "tax-portal" in payload
-    assert "backlog" in payload
 
 
 def test_write_focus_includes_duration_details_and_project():

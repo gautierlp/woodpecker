@@ -41,7 +41,9 @@ def test_build_log_handlers_file_handler_persists_records(tmp_path, monkeypatch)
     monkeypatch.setenv("WOODPECKER_LOG_FILE", str(log_file))
 
     handler = _file_handlers(main._build_log_handlers())[0]
-    record = logging.LogRecord("woodpecker.test", logging.INFO, __file__, 1, "persisted-line", None, None)
+    record = logging.LogRecord(
+        "woodpecker.test", logging.INFO, __file__, 1, "persisted-line", None, None
+    )
     handler.emit(record)
     handler.flush()
     handler.close()

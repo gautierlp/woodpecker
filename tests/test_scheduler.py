@@ -1,10 +1,11 @@
 import inspect
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from woodpecker import config, main, scheduler, sidecar
+from woodpecker import config, main, render, replies, scheduler, sidecar
 from woodpecker.models import STATUS_PENDING, Task
 from woodpecker.store import Store
 
@@ -43,6 +44,19 @@ class FakeVikunja:
 
     def delete_task(self, task_id):
         return self._open.pop(task_id, None) is not None
+
+    def update_task(self, task_id, deadline=None, priority=None, text=None):
+        task = self._open.get(task_id)
+        if task is None:
+            return None
+        changes = {}
+        if deadline is not None:
+            changes["deadline"] = deadline
+        if text is not None:
+            changes["text"] = text
+        task = replace(task, **changes)
+        self._open[task_id] = task
+        return task
 
 
 def _task(id, priority=0, deadline=None, created_at=None):
@@ -94,47 +108,6 @@ def collector():
     return sent, lambda msg: sent.append(msg)
 
 
-def test_daily_focus_sends_prose_then_matters():
-    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, 4, created_at=now, deadline=now.date())])
-    sent, send = collector()
-    scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
-    assert len(sent) == 1
-    assert sent[0].startswith("canned prose")
-    assert "Today's priorities" in sent[0]
-    assert "task 1" in sent[0]
-
-
-def test_daily_focus_snapshots_the_morning_shown_order():
-    # The 06:00 focus must snapshot the exact subset it shows (priority >= 2, has a due
-    # date), keyed by chat, so a number typed later resolves against this morning's list,
-    # not a live order later completions may have renumbered. A no-date, low-priority task
-    # is not shown and must not be in the snapshot.
-    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    a = _task(1, 4, created_at=now, deadline=now.date())
-    b = _task(2, 0, created_at=now)
-    store = fresh([a, b])
-    sent, send = collector()
-    scheduler.send_daily_focus(store, send, FakeClient(), now, chat_id=42)
-    assert store.load_display(42) == [a.id]
-
-
-def test_nags_skipped_during_quiet_hours():
-    now = datetime(2026, 7, 12, 5, tzinfo=TZ)  # before 06:00
-    store = fresh([_task(1, created_at=now)])
-    sent, send = collector()
-    scheduler.send_nags(store, send, FakeClient(), now)
-    assert sent == []
-
-
-def test_nags_skipped_when_no_pending_task():
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
-    store = fresh()
-    sent, send = collector()
-    scheduler.send_nags(store, send, FakeClient(), now)
-    assert sent == []
-
-
 def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
     """Regression for the silent 6am brief: BackgroundScheduler ran the jobs on a
     worker thread, where the bot's SQLite connection is unusable ("SQLite objects
@@ -143,10 +116,10 @@ def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
     job a coroutine, so APScheduler runs them on the bot's own event-loop thread."""
     store = fresh()
     sent, send = collector()
-    sched = main.build_scheduler(store, send, FakeClient(), chat_id=42)
+    sched = main.build_scheduler(store, send, FakeClient(), vault_path="/nope")
     assert isinstance(sched, AsyncIOScheduler)
     jobs = sched.get_jobs()
-    assert len(jobs) == 1 + len(config.NAG_HOURS)
+    assert len(jobs) == 3
     for job in jobs:
         assert inspect.iscoroutinefunction(job.func), f"{job.func} must be a coroutine"
 
@@ -163,104 +136,152 @@ def test_scheduled_jobs_fire_in_the_configured_timezone(monkeypatch):
     monkeypatch.setattr(cron_module, "get_localzone", lambda: ZoneInfo("Etc/UTC"))
     store = fresh()
     sent, send = collector()
-    sched = main.build_scheduler(store, send, FakeClient(), chat_id=42)
+    sched = main.build_scheduler(store, send, FakeClient(), vault_path="/nope")
     for job in sched.get_jobs():
         assert str(job.trigger.timezone) == config.TIMEZONE, (
             f"{job.func} trigger tz is {job.trigger.timezone}, expected {config.TIMEZONE}"
         )
 
 
-def test_nag_sends_and_marks_nagged():
-    created = datetime(2026, 7, 8, tzinfo=TZ)
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
-    store = fresh([_task(1, created_at=created)])
+MORNING = datetime(2026, 10, 8, 9, tzinfo=TZ)
+CHECKIN = datetime(2026, 10, 8, 14, tzinfo=TZ)
+SUNDAY = datetime(2026, 10, 11, 10, tzinfo=TZ)
+
+
+def _vault(tmp_path, body):
+    (tmp_path / "Taxes.md").write_text(body, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_morning_names_a_frog_with_the_legend_then_the_vault(tmp_path):
+    store = fresh([_task(1)])
     sent, send = collector()
-    scheduler.send_nags(store, send, FakeClient(), now)
-    assert len(sent) == 1
-    assert store.get_task(1).last_nagged_at == now
+    vault_path = _vault(tmp_path, "- [ ] file the return 📅 2026-10-10\n")
+    scheduler.send_morning(store, send, FakeClient(), MORNING, vault_path)
+    [text] = sent
+    assert text.startswith("canned prose\n\n" + render.FROG_LEGEND)
+    assert text.endswith("• file the return (📅 2026-10-10, Taxes)\nTick these in Obsidian.")
+    assert store.frog_of_day(MORNING.date()).task_id == 1
+    assert store.get_open_prompt().kind == replies.FROG
 
 
-def test_slow_resurface_nags_a_normal_stale_nonfocus_task():
-    # An important stale task is the focus (frog). A separate normal stale task should
-    # also get a slow-resurface poke, so two messages go out and the tadpole is marked.
-    created = datetime(2026, 7, 5, tzinfo=TZ)  # 7 days before `now`
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
-    store = fresh(
-        [
-            _task(1, 4, created_at=created),  # becomes focus
-            _task(2, 0, created_at=created),  # tadpole
-        ]
-    )
+def test_morning_logs_the_frog(tmp_path, caplog):
+    store = fresh([_task(1)])
     sent, send = collector()
-    scheduler.send_nags(store, send, FakeClient(), now)
-    assert len(sent) == 2
-    assert store.get_task(2).last_nagged_at == now
+    with caplog.at_level("INFO", logger="woodpecker.scheduler"):
+        scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert "frog 1" in caplog.text
 
 
-def test_slow_resurface_gated_by_cadence():
-    # The tadpole was poked yesterday, well within SLOW_RESURFACE_DAYS, so only the
-    # frog nag goes out this run.
-    created = datetime(2026, 7, 1, tzinfo=TZ)
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
-    store = fresh(
-        [
-            _task(1, 4, created_at=created),
-            _task(2, 0, created_at=created),
-        ]
-    )
-    store.mark_nagged(2, datetime(2026, 7, 11, 13, tzinfo=TZ))  # poked yesterday
+def test_morning_with_an_unreadable_vault_still_sends_the_frog(tmp_path):
+    store = fresh([_task(1)])
     sent, send = collector()
-    scheduler.send_nags(store, send, FakeClient(), now)
-    assert len(sent) == 1
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path / "missing"))
+    [text] = sent
+    assert "canned prose" in text
+    assert text.endswith("Vault: not readable (not a folder)")
 
 
-def test_daily_focus_sends_a_fallback_when_the_llm_fails():
-    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
-    store = fresh([_task(1, 4, created_at=now, deadline=now.date())])  # eligible frog
+def test_morning_with_a_claude_error_uses_the_plain_line(tmp_path):
+    store = fresh([_task(1)])
     sent, send = collector()
-    scheduler.send_daily_focus(store, send, RaisingClient(), now, chat_id=42)
-    assert len(sent) == 1  # the user hears about it rather than silence
-    assert sent[0]  # non-empty fallback text
+    scheduler.send_morning(store, send, RaisingClient(), MORNING, str(tmp_path))
+    assert sent[0].startswith('Today: "task 1".')
 
 
-class RaisingStore:
-    """A store whose list_pending() always raises, to simulate a Vikunja outage."""
-
-    def list_pending(self):
-        raise RuntimeError("vikunja is down")
-
-
-def test_daily_focus_does_not_propagate_when_vikunja_is_down():
-    now = datetime(2026, 7, 12, 6, tzinfo=TZ)
+def test_morning_with_an_empty_backlog(tmp_path):
+    store = fresh([])
     sent, send = collector()
-    # Must not raise: an infra hiccup at 06:00 should be logged, not crash the job.
-    scheduler.send_daily_focus(RaisingStore(), send, FakeClient(), now, chat_id=42)
-    assert sent == []  # no spam for an infra hiccup; logging + healthchecks covers it
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert sent == ["Backlog empty. Nothing to chase today."]
+    assert store.get_open_prompt() is None
 
 
-def test_nags_sends_fallback_and_does_not_propagate_when_vikunja_is_down():
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
+def test_the_third_t_turns_the_next_morning_into_the_reframe(tmp_path):
+    store = fresh([_task(1)])
+    for offset in (3, 2, 1):
+        day = MORNING.date() - timedelta(days=offset)
+        store.record_frog(day, 1)
+        store.mark_frog_answered(day, "t")
     sent, send = collector()
-    # Must not raise: the outage is caught before any selection logic runs.
-    scheduler.send_nags(RaisingStore(), send, FakeClient(), now)
-    assert len(sent) == 1
-    assert (
-        sent[0] == "I tried to nudge you but something on my end broke. I'll try again next time."
-    )
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert render.REFRAME_LEGEND in sent[0]
+    assert store.get_open_prompt().kind == replies.REFRAME
 
 
-def test_nags_attempt_the_tadpole_even_if_the_frog_nag_fails():
-    # An important stale frog and a normal stale tadpole. The frog nag raises; the tadpole
-    # nag must still be attempted, and the user gets exactly one failure note.
-    created = datetime(2026, 7, 5, tzinfo=TZ)  # 7 days before now
-    now = datetime(2026, 7, 12, 13, tzinfo=TZ)
-    store = fresh(
-        [
-            _task(1, 4, created_at=created),
-            _task(2, 0, created_at=created),
-        ]
-    )
+def test_checkin_asks_when_the_frog_has_no_answer(tmp_path):
+    store = fresh([_task(1)])
+    store.record_frog(CHECKIN.date(), 1)
     sent, send = collector()
-    scheduler.send_nags(store, send, RaisingClient(), now)
-    # Both nags raise, so no real nags go out, but the user is told once, not zero times.
-    assert len(sent) == 1
+    scheduler.send_checkin(store, send, CHECKIN, str(tmp_path))
+    assert sent == ['Still on for "task 1" today?\n' + render.FROG_LEGEND]
+
+
+def test_checkin_after_o_asks_how_it_goes(tmp_path):
+    store = fresh([_task(1)])
+    store.record_frog(CHECKIN.date(), 1)
+    store.mark_frog_started(CHECKIN.date(), MORNING)
+    sent, send = collector()
+    scheduler.send_checkin(store, send, CHECKIN, str(tmp_path))
+    assert sent[0].startswith('How is "task 1" going?')
+
+
+def test_checkin_is_skipped_after_an_answer(tmp_path):
+    for letter in ("d", "t", "x", "n"):
+        store = fresh([_task(1)])
+        store.record_frog(CHECKIN.date(), 1)
+        store.mark_frog_answered(CHECKIN.date(), letter)
+        sent, send = collector()
+        scheduler.send_checkin(store, send, CHECKIN, str(tmp_path))
+        assert sent == [], letter
+
+
+def test_checkin_carries_vault_tasks_due_today(tmp_path):
+    store = fresh([_task(1)])
+    store.record_frog(CHECKIN.date(), 1)
+    store.mark_frog_answered(CHECKIN.date(), "d")
+    sent, send = collector()
+    vault_path = _vault(tmp_path, "- [ ] pay rent 📅 2026-10-08\n- [ ] later 📅 2026-10-09\n")
+    scheduler.send_checkin(store, send, CHECKIN, vault_path)
+    assert sent == [
+        "Due in the vault today:\n• pay rent (📅 2026-10-08, Taxes)\nTick these in Obsidian."
+    ]
+
+
+def test_weekly_review_lists_stale_tasks_and_opens_the_prompt():
+    old = _task(1, created_at=SUNDAY - timedelta(days=20))
+    new = _task(2, created_at=SUNDAY - timedelta(days=2))
+    store = fresh([old, new])
+    sent, send = collector()
+    scheduler.send_weekly_review(store, send, SUNDAY)
+    assert "1. task 1 (20d)" in sent[0]
+    assert "task 2" not in sent[0]
+    assert store.get_open_prompt().task_ids == [1]
+
+
+def test_weekly_review_with_nothing_stale_sends_nothing():
+    store = fresh([_task(1, created_at=SUNDAY - timedelta(days=1))])
+    sent, send = collector()
+    scheduler.send_weekly_review(store, send, SUNDAY)
+    assert sent == []
+
+
+def test_quiet_hours_send_nothing(tmp_path):
+    late = datetime(2026, 10, 8, 23, 30, tzinfo=TZ)
+    store = fresh([_task(1, created_at=late - timedelta(days=30))])
+    store.record_frog(late.date(), 1)
+    sent, send = collector()
+    scheduler.send_morning(store, send, FakeClient(), late, str(tmp_path))
+    scheduler.send_checkin(store, send, late, str(tmp_path))
+    scheduler.send_weekly_review(store, send, late)
+    assert sent == []
+
+
+def test_cron_times():
+    store = fresh()
+    sent, send = collector()
+    sched = main.build_scheduler(store, send, FakeClient(), vault_path="/nope")
+    fields = sorted(
+        (str(job.trigger.fields[4]), str(job.trigger.fields[5])) for job in sched.get_jobs()
+    )  # (day_of_week, hour)
+    assert fields == [("*", "14"), ("*", "9"), ("sun", "10")]
