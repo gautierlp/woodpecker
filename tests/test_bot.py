@@ -1,12 +1,13 @@
 import asyncio
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from woodpecker import bot, sidecar
+from woodpecker import bot, replies, scheduler, sidecar
 from woodpecker.llm import Intent
 from woodpecker.memory import ConversationMemory
 from woodpecker.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
@@ -50,6 +51,15 @@ class FakeVikunja:
 
     def delete_task(self, task_id):
         return self._open.pop(task_id, None) is not None
+
+    def update_task(self, task_id, deadline=None, priority=None, text=None):
+        task = self._open.get(task_id)
+        if task is None:
+            return None
+        if deadline is not None:
+            task = replace(task, deadline=deadline)
+        self._open[task_id] = task
+        return task
 
 
 def _task(id, created_at=None):
@@ -370,7 +380,8 @@ def test_handle_start_replies_with_welcome():
 def test_welcome_describes_the_morning_rhythm():
     assert "louder" not in bot.WELCOME
     assert "Each morning I name one thing and a first step" in bot.WELCOME
-    assert "answer with one letter" in bot.WELCOME
+    assert "answer in your own words" in bot.WELCOME
+    assert "one letter" in bot.WELCOME
     assert "\u2014" not in bot.WELCOME
 
 
@@ -425,3 +436,93 @@ def test_a_letter_with_no_prompt_is_refused(monkeypatch):
     update = make_update("x")
     asyncio.run(bot.handle_message(update, make_context(store)))
     assert update.message.reply_text.call_args.args[0] == "Nothing to answer right now."
+
+
+FROG_DAY = datetime(2026, 10, 8, 9, tzinfo=TZ)
+
+
+def _open_frog(store, task_id, at=FROG_DAY, kind=replies.FROG):
+    store.record_frog(at.date(), task_id)
+    store.set_open_prompt(kind, [task_id], at)
+
+
+def _say(monkeypatch, store, text, intent, now):
+    """Send a plain-language message that Claude reads as the given intent."""
+    monkeypatch.setattr(bot.llm, "interpret_message", lambda *a, **k: [intent])
+    monkeypatch.setattr(bot.config, "now_paris", lambda: now)
+    update = make_update(text)
+    asyncio.run(bot.handle_message(update, make_context(store)))
+    return update.message.reply_text.call_args.args[0]
+
+
+def test_a_plain_done_on_the_frog_counts_like_d(monkeypatch, tmp_path, caplog):
+    store = fresh([_task(1)])
+    _open_frog(store, 1)
+    now = FROG_DAY + timedelta(minutes=30)
+    with caplog.at_level("INFO", logger="woodpecker.bot"):
+        reply = _say(monkeypatch, store, "done", Intent(action="complete", task_id=1), now)
+    assert reply == "Done, nice."
+    assert store.frog_of_day(FROG_DAY.date()).answered == "d"
+    assert store.get_open_prompt() is None
+    assert "reply 1 d-text" in caplog.text
+    sent = []
+    scheduler.send_checkin(store, sent.append, FROG_DAY.replace(hour=14), str(tmp_path))
+    assert sent == []
+
+
+def test_a_plain_drop_on_the_reframe_counts_like_x(monkeypatch, caplog):
+    store = fresh([_task(1)])
+    _open_frog(store, 1, kind=replies.REFRAME)
+    now = FROG_DAY + timedelta(minutes=30)
+    with caplog.at_level("INFO", logger="woodpecker.bot"):
+        _say(monkeypatch, store, "forget it", Intent(action="drop", task_id=1), now)
+    assert store.frog_of_day(FROG_DAY.date()).answered == "x"
+    assert store.get_open_prompt() is None
+    assert "reply 1 x-text" in caplog.text
+
+
+def test_a_plain_push_to_tomorrow_three_days_running_brings_the_reframe(monkeypatch, caplog):
+    store = fresh([_task(1)])
+    for offset in range(3):
+        morning = FROG_DAY + timedelta(days=offset)
+        _open_frog(store, 1, at=morning)
+        intent = Intent(action="reschedule", task_id=1, deadline=morning.date() + timedelta(days=1))
+        with caplog.at_level("INFO", logger="woodpecker.bot"):
+            _say(monkeypatch, store, "push it to tomorrow", intent, morning)
+        assert store.frog_of_day(morning.date()).answered == "t"
+        assert store.get_open_prompt() is not None  # like the letter t, the prompt stays
+        assert store.tomorrow_count(1) == offset + 1
+    assert "reply 1 t-text" in caplog.text
+    sent = []
+    next_morning = FROG_DAY + timedelta(days=3)
+    scheduler.send_morning(store, sent.append, object(), next_morning, "/nope")
+    assert store.get_open_prompt().kind == replies.REFRAME
+
+
+def test_a_plain_answer_about_another_task_leaves_the_frog_open(monkeypatch):
+    store = fresh([_task(1), _task(2)])
+    _open_frog(store, 1)
+    now = FROG_DAY + timedelta(minutes=30)
+    _say(monkeypatch, store, "did task 2", Intent(action="complete", task_id=2), now)
+    assert store.frog_of_day(FROG_DAY.date()).answered is None
+    assert store.get_open_prompt().task_ids == [1]
+
+
+def test_a_failed_plain_answer_leaves_the_frog_open(monkeypatch):
+    store = fresh([_task(1)])
+    _open_frog(store, 1)
+    store._vk.mark_done(1)  # gone from Vikunja: complete_task finds nothing
+    now = FROG_DAY + timedelta(minutes=30)
+    reply = _say(monkeypatch, store, "done", Intent(action="complete", task_id=1), now)
+    assert reply == "Couldn't find that one."
+    assert store.frog_of_day(FROG_DAY.date()).answered is None
+    assert store.get_open_prompt() is not None
+
+
+def test_a_plain_priority_bump_on_the_frog_is_not_a_t(monkeypatch):
+    store = fresh([_task(1)])
+    _open_frog(store, 1)
+    now = FROG_DAY + timedelta(minutes=30)
+    intent = Intent(action="reschedule", task_id=1, priority=PRIORITY_IMPORTANT)
+    _say(monkeypatch, store, "this one matters", intent, now)
+    assert store.frog_of_day(FROG_DAY.date()).answered is None

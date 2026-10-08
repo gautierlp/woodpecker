@@ -7,7 +7,8 @@ logger = logging.getLogger(__name__)
 
 WELCOME = (
     "Hey, I'm Woodpecker. Tell me what you need to do and I'll hold it for you. "
-    "Each morning I name one thing and a first step; answer with one letter. "
+    "Each morning I name one thing and a first step; answer in your own words, "
+    "or with one letter as a shortcut. "
     'Just type tasks in plain language, like "call the vet tomorrow".'
 )
 
@@ -90,7 +91,10 @@ def _free_text(store, client, memory, chat_id, text, now) -> str:
             shown = store.list_pending()
             replies_out.append(render.render_backlog(shown, now))
         else:
-            replies_out.append(orchestrator.apply_intent(store, intent, now))
+            reply, changed = orchestrator.apply(store, intent, now)
+            if changed:
+                _answer_frog(store, intent)
+            replies_out.append(reply)
     reply = "\n".join(replies_out)
     logger.debug("Reply body: %s", reply)
     # If we just printed the backlog, remember the exact order shown, so the numbers in
@@ -98,6 +102,28 @@ def _free_text(store, client, memory, chat_id, text, now) -> str:
     if shown is not None:
         store.save_display(chat_id, [t.id for t in render.display_order(shown, now)])
     return reply
+
+
+# A plain-language answer about the open frog counts like its letter: "done" is d, "drop
+# it" is x, "push it to Friday" is t. The letters stay a shortcut, not the only way.
+_FROG_LETTER = {"complete": "d", "drop": "x", "reschedule": "t"}
+
+
+def _answer_frog(store, intent) -> None:
+    """Mark the frog answered when an applied intent is about the task of the open frog or
+    reframe prompt. Call it only after the store made the change."""
+    letter = _FROG_LETTER.get(intent.action)
+    if letter is None or (letter == "t" and intent.deadline is None):
+        return  # a priority bump moves no date, so it is not a "tomorrow"
+    prompt = store.get_open_prompt()
+    if prompt is None or prompt.kind not in (replies.FROG, replies.REFRAME):
+        return
+    if intent.task_id != prompt.task_ids[0]:
+        return
+    store.mark_frog_answered(prompt.sent_at.date(), letter)
+    if letter != "t":  # like the letter t, a new date keeps the prompt open
+        store.clear_open_prompt()
+    logger.info("reply %s %s-text", intent.task_id, letter)
 
 
 async def handle_error(update, context) -> None:
