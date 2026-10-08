@@ -38,6 +38,19 @@ External services:
 - **Anthropic API**: Claude interprets each inbound message and writes the focus,
   nags, and replies
 
+### Rhythm
+
+Two messages a day at most. At 09:00 the morning names one frog (any pending task:
+overdue first, then most postponed, then oldest) with a Claude-written first step and
+the letter legend `d done · o on it · t tomorrow · x drop`, then a "From the vault:"
+block (vault tasks overdue, due within 7 days, or marked ⏫). The 14:00 check-in fires
+only when the frog has no answer yet, or a vault task is due today or overdue. On Sunday
+at 10:00 a weekly review lists up to 5 tasks pending 14 days or more; replies look like
+`x 1 3` or `w 2`. After the third `t` on a frog, the next morning asks
+`s smaller step · n not mine to do · x drop`. The vault is mounted read-only at `/vault`
+(`WOODPECKER_VAULT_PATH`); Woodpecker never writes to it. Spec:
+`docs/superpowers/specs/2026-10-08-fewer-sharper-nudges-design.md`.
+
 ### Division of labour (core principle)
 
 - **Claude** handles anything needing judgment or tone: parsing a text into a task,
@@ -61,7 +74,7 @@ Key libraries:
 - `python-telegram-bot`: Telegram handler
 - `anthropic`: Claude API client
 - `httpx`: Vikunja REST client
-- `APScheduler`: cron-based scheduler (06:00 focus, midday/evening nags, daily stale-scan)
+- `APScheduler`: cron-based scheduler (09:00 morning, 14:00 check-in, Sunday 10:00 weekly review)
 - `sqlite3` (stdlib): sidecar storage (nag state + display snapshot only)
 
 ## Code Conventions
@@ -85,14 +98,16 @@ src/woodpecker/
   bot.py          Telegram handler: receives messages, sends replies and nags
   llm.py          Anthropic client: interprets messages, classifies intent, writes text
   orchestrator.py Applies a parsed intent (via the Store) and returns the reply text
-  selection.py    Pure rules: stale detection, daily-focus selection, slow-resurface, quiet hours
+  selection.py    Pure rules: the frog, the weekly stale list, the vault reminders, quiet hours
+  vault.py        Read-only reader of the Obsidian vault's open checkboxes
+  replies.py      Deterministic one-letter replies (d o t x s n, weekly x 1 3 / w 2)
   render.py       Deterministic backlog rendering and display ordering
   memory.py       In-process recent-conversation and pending-outbound memory per chat
-  scheduler.py    Job bodies: daily focus and nags (wired to APScheduler cron in main.py)
+  scheduler.py    Job bodies: morning, check-in, weekly review (wired to APScheduler cron in main.py)
   vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
                   the Task <-> Vikunja JSON field mapping
-  sidecar.py      SQLite access for Woodpecker's own state: the nag_state table and the
-                  display_snapshot table (no task data)
+  sidecar.py      SQLite access for Woodpecker's own state: the nag_state, display_snapshot,
+                  bump_state, frog_state and open_prompt tables (no task data)
   store.py        Store: the storage seam the rest of Woodpecker talks to. Combines a
                   VikunjaClient (task data) and the sidecar connection (nag state,
                   display snapshot) behind one interface returning Task
@@ -160,7 +175,7 @@ ssh jarvis "docker logs <container> --tail 100"
 - One test file per module.
 - External APIs (Telegram, Anthropic) are **mocked at the boundary**: no real HTTP calls
   in tests, so the suite is fast, free, and never spams the user.
-- **What to test:** stale-detection rule (boundary at exactly 3 days), daily-focus
-  selection (priority / deadline / age tie-breaking, the max-3 surfaced cap), priority
-  ordering for the backlog dump, quiet-hours enforcement, task add/complete/drop logic.
+- **What to test:** frog selection (overdue, bump count, age), the letter replies, the
+  vault reader and windows, priority ordering for the backlog dump, quiet-hours
+  enforcement, task add/complete/drop logic.
 - **What NOT to test:** actual LLM output quality, Telegram plumbing.

@@ -20,6 +20,9 @@ services:
       # the task backlog itself lives in Vikunja, not on this bind mount.
       - ./data:/app/data
       - ./logs:/app/logs
+      # The Obsidian vault, read-only: the morning lists its dated tasks. Woodpecker never
+      # writes there (the vault is synced by its own job on jarvis).
+      - /home/agent/vault:/vault:ro
     # Join the shared NPM network so woodpecker can reach Vikunja by container name
     # (VIKUNJA_URL=http://vikunja:3456), keeping task traffic internal to the host.
     networks:

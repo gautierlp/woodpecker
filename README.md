@@ -19,7 +19,7 @@
   <h1 align="center">woodpecker</h1>
 
   <p align="center">
-    <em>It knocks at 6 am. It knocks at noon. It knocks until the task is done.</em>
+    <em>One knock in the morning. One more if you ignored it. It knocks until the task is done.</em>
     <br />
     <br />
     A Telegram bot that keeps pecking at the tasks you avoid.
@@ -71,12 +71,12 @@
 morning. You have done six easier things instead, every morning.
 
 A todo list waits for you. A woodpecker does not. You text it your tasks in plain words,
-and it files them in Vikunja. At 6 am it picks the frog, the one task you least want to
-do, and puts it at the top of the message. Then it comes back at 9, 13 and 19. A task
-that matters and has not moved in three days gets louder each time. Before it gets
-loud, it asks what is blocking you.
+and it files them in Vikunja. At 9 am it picks the frog, the one task you least want to
+do, with a first step small enough to start now. It comes back at 2 pm only if you have
+not answered, or if a vault task is due. On Sunday it reviews what has sat for two
+weeks. Fewer messages, each one sharper.
 
-It stops at 23:00. It starts again at 6.
+It stays quiet from 23:00 to 6:00.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -86,8 +86,9 @@ It stops at 23:00. It starts again at 6.
 * [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) for the chat
 * [Claude](https://www.anthropic.com/claude) (Haiku 4.5) to read your messages and write the nags
 * [Vikunja](https://vikunja.io/) as the task store, over its REST API
-* APScheduler for the 6 am message and the nags
+* APScheduler for the 9 am morning, the 2 pm check-in and the Sunday review
 * SQLite for the bot's own state (when it last nagged, the last list it showed you)
+* Your Obsidian vault, mounted read-only, for dated tasks that live outside Vikunja
 * Docker, one container
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -140,9 +141,10 @@ All settings live in `.env`:
 | `WOODPECKER_DB_PATH` | `data/sidecar.db` | The bot's own SQLite file. |
 | `WOODPECKER_LOG_LEVEL` | `INFO` | `DEBUG` logs every message and every Claude call. |
 | `WOODPECKER_LOG_FILE` | `logs/woodpecker.log` | Empty turns the file log off. |
+| `WOODPECKER_VAULT_PATH` | `/vault` | Where the Obsidian vault is mounted, read-only. |
 
-The old `JOLT_*` names still work. The nag hours, the quiet hours and the three-day
-threshold are constants at the top of `src/woodpecker/config.py`.
+The old `JOLT_*` names still work. The morning, check-in and review times, the quiet
+hours and the thresholds are constants at the top of `src/woodpecker/config.py`.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -161,26 +163,34 @@ you         done with the vet
 woodpecker  Done, nice.
 ```
 
-At 6 am:
+At 9 am:
 
 ```
-woodpecker  Frog first: call the accountant. Nine days now, and it takes ten minutes.
-            Also waiting: sort the insurance (5 days), renew the passport (4 days).
+woodpecker  Frog: call the accountant. Nine days now. First step: open your email
+            and find last year's invoice.
+            d done · o on it · t tomorrow · x drop
 
-            Full list:
-            1. Call the accountant
-            2. Sort the insurance
-            ...
+            From the vault:
+            • Send the VAT form (📅 2026-10-19, taxes)
+            Tick these in Obsidian.
 ```
 
-When a task that matters goes stale:
+Reply with one letter: `d` done, `o` on it, `t` tomorrow, `x` drop (it asks you to
+send `x` again to confirm). After the third `t` on the same frog, the next morning
+offers `s` smaller step, `n` not mine to do, or `x` drop.
+
+At 2 pm, only if you have not answered the frog or a vault task is due, a short
+check-in. On Sunday at 10 am, a review of up to 5 tasks pending 14 days or more:
 
 ```
-woodpecker  "Sort the insurance" has sat for 4 days. What is blocking it?
-            Break it down, or drop it?
+woodpecker  Weekly review: these have waited 14 days or more.
+            1. Sort the insurance (16d)
+            2. Renew the passport (15d)
+
+            Reply like x 1 3 to drop 1 and 3, w 2 to move 2 to next week. The rest stay.
 ```
 
-Say "it's a someday thing" and it backs off.
+Reply `x 1 3` to drop tasks 1 and 3, or `w 2` to push task 2 a week.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -188,19 +198,23 @@ Say "it's a someday thing" and it backs off.
 ## How it works
 
 The code splits the work in two. Claude does what needs judgment: it reads your
-message, works out the intent, and writes the 6 am message and the nags. Plain Python
+message, works out the intent, and writes the morning message and the check-ins. Plain Python
 does everything mechanical: the full backlog list, the age of each task, the order,
 the quiet hours, the schedule. A list you rely on should never be reworded by a model.
 
 1. **You write.** Claude turns the message into one or more intents (add, complete,
    drop, reschedule, edit) and the bot applies them to Vikunja.
-2. **6 am.** The bot picks the frog from the tasks due today or overdue, at Medium
-   priority or higher. Claude writes two to four lines about it. The full list follows,
-   built by code.
-3. **9, 13, 19.** If the frog has not moved, a nag. The evening one is blunter.
-4. **Three days untouched.** The task becomes a candidate. Priority decides how hard
-   the bot pushes. A stale important task goes to the top and gets loud. A stale
-   low-priority one stays quiet, and the bot suggests you drop it.
+2. **9 am.** The bot picks the frog from any pending task: overdue first, then the
+   most postponed, then the oldest. Claude writes the first step. Code adds the letter
+   legend and a "From the vault:" block with vault tasks that are overdue, due within
+   7 days, or marked with the high-priority sign.
+3. **2 pm.** A check-in, only if the frog has no answer yet (`d`, `t`, `x` or `n`
+   closes it) or a vault task is due today or overdue.
+4. **Sunday 10 am.** A review of up to 5 tasks pending 14 days or more. You drop or
+   push them with `x 1 3` or `w 2`.
+5. **Letters, not sentences.** Replies to the frog and the review are parsed by code
+   in `src/woodpecker/replies.py`, with no Claude call. The vault is read by
+   `src/woodpecker/vault.py`, read-only, and its text never goes through Claude.
 
 Vikunja holds every task. The bot keeps no copy of the list, only its own state in
 SQLite: when it last nagged about each task, and the order of the last list it sent,
@@ -233,8 +247,9 @@ your oldest tasks are.
 ## Roadmap
 
 - [x] Plain-language capture with Claude
-- [x] The 6 am frog and the three nags
-- [x] Stale detection, ranked by priority
+- [x] The 9 am frog, the 2 pm check-in and the Sunday review
+- [x] Read-only vault reminders
+- [x] Letter replies (`d o t x s n`)
 - [x] Vikunja as the task store
 - [x] Docker deploy with a self-hosted runner
 
