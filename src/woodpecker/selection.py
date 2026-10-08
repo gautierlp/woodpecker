@@ -53,8 +53,16 @@ def select_frog(tasks: list[Task], now: datetime) -> Task | None:
 
 
 def select_stale_for_review(tasks: list[Task], now: datetime, limit: int = 5) -> list[Task]:
-    """The tasks for the weekly review: pending STALE_REVIEW_DAYS or more, oldest first."""
-    stale = [t for t in tasks if is_stale(t, now, config.STALE_REVIEW_DAYS)]
+    """The tasks for the weekly review: pending STALE_REVIEW_DAYS or more, oldest first.
+    A task dated after today is skipped: "w" moved it a week on, and created_at alone
+    would list it again every Sunday."""
+    today = now.date()
+    stale = [
+        t
+        for t in tasks
+        if is_stale(t, now, config.STALE_REVIEW_DAYS)
+        and (t.deadline is None or t.deadline <= today)
+    ]
     return sorted(stale, key=lambda t: t.created_at)[:limit]
 
 

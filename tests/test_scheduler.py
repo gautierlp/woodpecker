@@ -302,3 +302,78 @@ def test_on_sunday_the_frog_and_the_review_both_stay_answerable(tmp_path):
     assert replies.answer(store, "d", later) == "Done, nice."
     assert replies.answer(store, "x 1", later) == "Dropped 1."
     assert store.list_pending() == []
+
+
+def test_checkin_with_an_unreadable_vault_sends_nothing(tmp_path, caplog):
+    store = fresh([_task(1)])
+    store.record_frog(CHECKIN.date(), 1)
+    store.mark_frog_answered(CHECKIN.date(), "d")
+    sent, send = collector()
+    with caplog.at_level("WARNING", logger="woodpecker.scheduler"):
+        scheduler.send_checkin(store, send, CHECKIN, str(tmp_path / "missing"))
+    assert sent == []
+    assert "Vault unreadable" in caplog.text
+
+
+def _bumped_three_times(store, task_id):
+    for offset in (3, 2, 1):
+        day = MORNING.date() - timedelta(days=offset)
+        store.record_frog(day, task_id)
+        store.mark_frog_answered(day, "t")
+
+
+def test_the_reframe_task_beats_overdue_tasks(tmp_path):
+    overdue = MORNING.date() - timedelta(days=2)
+    store = fresh(
+        [
+            _task(1, deadline=overdue),
+            _task(2, deadline=overdue),
+            _task(3, deadline=MORNING.date(), created_at=MORNING - timedelta(days=5)),
+        ]
+    )
+    _bumped_three_times(store, 3)
+    sent, send = collector()
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert store.frog_of_day(MORNING.date()).task_id == 3
+    assert store.get_open_prompt().kind == replies.REFRAME
+
+
+def test_the_oldest_reframe_task_comes_first(tmp_path):
+    store = fresh(
+        [
+            _task(1, created_at=MORNING - timedelta(days=5)),
+            _task(2, created_at=MORNING - timedelta(days=9)),
+        ]
+    )
+    _bumped_three_times(store, 1)
+    for offset in (6, 5, 4):
+        day = MORNING.date() - timedelta(days=offset)
+        store.record_frog(day, 2)
+        store.mark_frog_answered(day, "t")
+    sent, send = collector()
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert store.frog_of_day(MORNING.date()).task_id == 2
+
+
+def test_an_empty_backlog_logs_no_frog(tmp_path, caplog):
+    store = fresh([])
+    sent, send = collector()
+    with caplog.at_level("INFO", logger="woodpecker.scheduler"):
+        scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert "frog" not in caplog.text
+
+
+class DownVikunja(FakeVikunja):
+    def list_open(self):
+        raise RuntimeError("vikunja down")
+
+
+def test_morning_with_vikunja_down_closes_yesterdays_prompt(tmp_path):
+    conn = sidecar.connect(":memory:")
+    sidecar.init_db(conn)
+    store = Store(DownVikunja([_task(1)]), conn)
+    store.set_open_prompt(replies.FROG, [1], MORNING - timedelta(days=1))
+    sent, send = collector()
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    assert sent[0].startswith("My task list is unreachable this morning.")
+    assert store.get_open_prompt() is None

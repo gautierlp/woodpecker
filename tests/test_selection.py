@@ -151,6 +151,15 @@ def test_stale_review_keeps_14_days_and_more_oldest_first():
     assert [t.id for t in got] == [3, 1]
 
 
+def test_stale_review_skips_tasks_moved_to_a_later_date():
+    old = NOW - timedelta(days=30)
+    later = make(1, created=old, deadline=NOW.date() + timedelta(days=7))
+    today = make(2, created=old, deadline=NOW.date())
+    undated = make(3, created=old - timedelta(days=1))
+    got = selection.select_stale_for_review([later, today, undated], NOW)
+    assert [t.id for t in got] == [3, 2]
+
+
 def test_stale_review_limit():
     tasks = [make(i, created=NOW - timedelta(days=20 + i)) for i in range(1, 8)]
     got = selection.select_stale_for_review(tasks, NOW, limit=5)
