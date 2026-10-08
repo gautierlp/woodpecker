@@ -67,7 +67,7 @@ def _make_send(application, chat_id):
 
 
 def build_scheduler(store, send, client, vault_path) -> AsyncIOScheduler:
-    """Build the cron scheduler: the morning message, the check-in, the weekly review.
+    """Build the cron scheduler: the morning message and the check-in.
 
     The jobs are coroutines on purpose: AsyncIOScheduler runs coroutine jobs on the
     bot's own asyncio event loop, the same thread that owns the sidecar connection and
@@ -82,24 +82,12 @@ def build_scheduler(store, send, client, vault_path) -> AsyncIOScheduler:
     async def _checkin():
         scheduler.send_checkin(store, send, config.now_paris(), vault_path)
 
-    async def _weekly():
-        scheduler.send_weekly_review(store, send, config.now_paris())
-
     # Pass the timezone to every CronTrigger explicitly. APScheduler does NOT stamp the
     # scheduler's timezone onto a trigger; a trigger built without one defaults to the
     # machine's local zone (UTC in the container), so every job fired 2 hours off Paris.
     tz = config.TIMEZONE
     sched.add_job(_morning, CronTrigger(hour=config.FOCUS_HOUR, minute=0, timezone=tz))
     sched.add_job(_checkin, CronTrigger(hour=config.CHECKIN_HOUR, minute=0, timezone=tz))
-    sched.add_job(
-        _weekly,
-        CronTrigger(
-            day_of_week=config.WEEKLY_REVIEW_DAY,
-            hour=config.WEEKLY_REVIEW_HOUR,
-            minute=0,
-            timezone=tz,
-        ),
-    )
     return sched
 
 
@@ -129,12 +117,9 @@ def main() -> None:
         sched.start()
         application.bot_data["scheduler"] = sched
         logger.info(
-            "Scheduler started: morning at %02d:00, check-in at %02d:00, review %s %02d:00, "
-            "vault at %s",
+            "Scheduler started: morning at %02d:00, check-in at %02d:00, vault at %s",
             config.FOCUS_HOUR,
             config.CHECKIN_HOUR,
-            config.WEEKLY_REVIEW_DAY,
-            config.WEEKLY_REVIEW_HOUR,
             config.vault_path(),
         )
 

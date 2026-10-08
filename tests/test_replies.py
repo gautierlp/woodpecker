@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from woodpecker import render, replies, sidecar
+from woodpecker import replies, sidecar
 from woodpecker.models import STATUS_PENDING, Task
 from woodpecker.store import Store
 from woodpecker.vikunja import VikunjaError
@@ -163,64 +163,11 @@ def test_n_drops_with_a_confirm():
     assert vk.calls == [("delete", 1)]
 
 
-def test_weekly_drops_and_moves_by_number():
-    store, vk = fresh(4, 5, 6)
-    store.set_open_prompt(replies.WEEKLY, [4, 5, 6], NOW)
-    reply = replies.answer(store, "x 1 3 w 2", NOW)
-    assert ("delete", 4) in vk.calls and ("delete", 6) in vk.calls
-    assert ("update", 5, NOW.date() + timedelta(days=7), None) in vk.calls
-    assert reply == "Dropped 1, 3. Moved 2 to next week."
-    assert store.get_open_prompt() is None
-
-
-def test_weekly_names_numbers_out_of_range():
-    store, vk = fresh(4)
-    store.set_open_prompt(replies.WEEKLY, [4], NOW)
-    assert replies.answer(store, "x 9", NOW) == "No 9 in the list."
-    assert vk.calls == []
-
-
-def test_a_weekly_form_with_only_a_frog_prompt_gets_the_legend():
-    store, vk = with_frog()
-    assert replies.answer(store, "x 1", NOW) == f"Reply with one letter: {render.FROG_LEGEND}"
-    assert vk.calls == []
-
-
-def test_the_frog_and_the_weekly_review_can_both_be_answered():
-    store, vk = with_frog(replies.FROG, 1, 4, 5)
-    store.set_open_prompt(replies.WEEKLY, [4, 5], NOW)
-    assert replies.answer(store, "d", NOW) == "Done, nice."
-    assert replies.answer(store, "x 2", NOW) == "Dropped 2."
-    assert vk.calls == [("done", 1), ("delete", 5)]
-    assert store.get_open_prompt() is None
-    assert store.get_open_prompt(sidecar.WEEKLY_SLOT) is None
-
-
-def test_a_single_letter_on_the_weekly_prompt_gets_a_hint():
-    store, vk = fresh(4)
-    store.set_open_prompt(replies.WEEKLY, [4], NOW)
-    assert "x 1 3" in replies.answer(store, "d", NOW)
-
-
 def test_each_reply_logs_task_and_action(caplog):
     store, vk = with_frog()
     with caplog.at_level(logging.INFO, logger="woodpecker.replies"):
         replies.answer(store, "t", NOW)
     assert "reply 1 t" in caplog.text
-
-
-def test_weekly_form_accepts_commas_and_a_missing_space():
-    for text in ("x 1,3", "x1 3", "x 1, 3"):
-        store, vk = fresh(4, 5, 6)
-        store.set_open_prompt(replies.WEEKLY, [4, 5, 6], NOW)
-        assert replies.answer(store, text, NOW) == "Dropped 1, 3.", text
-        assert vk.calls == [("delete", 4), ("delete", 6)], text
-
-
-def test_weekly_form_with_commas_and_a_glued_w():
-    store, vk = fresh(4, 5, 6)
-    store.set_open_prompt(replies.WEEKLY, [4, 5, 6], NOW)
-    assert replies.answer(store, "x 1, 3 w2", NOW) == "Dropped 1, 3. Moved 2 to next week."
 
 
 class RenameFails(FakeVikunja):
@@ -246,14 +193,5 @@ def test_a_letter_in_the_step_window_does_not_rename():
     store, vk = with_frog(replies.REFRAME)
     replies.answer(store, "s", NOW)
     assert replies.answer(store, "x", NOW + timedelta(minutes=1)) == replies.NOTHING_OPEN
-    assert vk.get_task(1).text == "task 1"
-    assert store.get_open_prompt() is None
-
-
-def test_a_weekly_form_in_the_step_window_answers_the_review():
-    store, vk = with_frog(replies.REFRAME, 1, 4)
-    store.set_open_prompt(replies.WEEKLY, [4], NOW)
-    replies.answer(store, "s", NOW)
-    assert replies.answer(store, "w 1", NOW + timedelta(minutes=1)) == "Moved 1 to next week."
     assert vk.get_task(1).text == "task 1"
     assert store.get_open_prompt() is None

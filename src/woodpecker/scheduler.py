@@ -4,14 +4,8 @@ from pathlib import Path
 
 from . import config, llm, render, vault
 from .models import STATUS_PENDING
-from .replies import FROG, REFRAME, WEEKLY
-from .selection import (
-    is_quiet_hours,
-    select_frog,
-    select_stale_for_review,
-    select_vault_due,
-    select_vault_reminders,
-)
+from .replies import FROG, REFRAME
+from .selection import is_quiet_hours, select_frog, select_vault_due, select_vault_reminders
 
 logger = logging.getLogger(__name__)
 
@@ -118,21 +112,3 @@ def send_checkin(store, send, now: datetime, vault_path: str) -> None:
         logger.info("Skipping check-in: nothing useful to say")
         return
     send("\n\n".join(parts))
-
-
-def send_weekly_review(store, send, now: datetime) -> None:
-    logger.info("Weekly review job firing at %s", now.isoformat())
-    if is_quiet_hours(now):
-        logger.info("Skipping weekly review: quiet hours")
-        return
-    try:
-        tasks = store.list_pending()
-    except Exception:
-        logger.exception("Weekly review could not load pending tasks")
-        return
-    stale = select_stale_for_review(tasks, now)
-    if not stale:
-        logger.info("Skipping weekly review: nothing stale")
-        return
-    store.set_open_prompt(WEEKLY, [t.id for t in stale], now)
-    send(render.render_weekly_review(stale, now))

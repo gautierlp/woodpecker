@@ -119,7 +119,7 @@ def test_scheduled_jobs_run_on_the_event_loop_not_a_worker_thread():
     sched = main.build_scheduler(store, send, FakeClient(), vault_path="/nope")
     assert isinstance(sched, AsyncIOScheduler)
     jobs = sched.get_jobs()
-    assert len(jobs) == 3
+    assert len(jobs) == 2
     for job in jobs:
         assert inspect.iscoroutinefunction(job.func), f"{job.func} must be a coroutine"
 
@@ -145,7 +145,6 @@ def test_scheduled_jobs_fire_in_the_configured_timezone(monkeypatch):
 
 MORNING = datetime(2026, 10, 8, 9, tzinfo=TZ)
 CHECKIN = datetime(2026, 10, 8, 14, tzinfo=TZ)
-SUNDAY = datetime(2026, 10, 11, 10, tzinfo=TZ)
 
 
 def _vault(tmp_path, body):
@@ -248,25 +247,6 @@ def test_checkin_carries_vault_tasks_due_today(tmp_path):
     ]
 
 
-def test_weekly_review_lists_stale_tasks_and_opens_the_prompt():
-    old = _task(1, created_at=SUNDAY - timedelta(days=20))
-    new = _task(2, created_at=SUNDAY - timedelta(days=2))
-    store = fresh([old, new])
-    sent, send = collector()
-    scheduler.send_weekly_review(store, send, SUNDAY)
-    assert "1. task 1 (20d)" in sent[0]
-    assert "task 2" not in sent[0]
-    assert store.get_open_prompt(sidecar.WEEKLY_SLOT).task_ids == [1]
-    assert store.get_open_prompt() is None
-
-
-def test_weekly_review_with_nothing_stale_sends_nothing():
-    store = fresh([_task(1, created_at=SUNDAY - timedelta(days=1))])
-    sent, send = collector()
-    scheduler.send_weekly_review(store, send, SUNDAY)
-    assert sent == []
-
-
 def test_quiet_hours_send_nothing(tmp_path):
     late = datetime(2026, 10, 8, 23, 30, tzinfo=TZ)
     store = fresh([_task(1, created_at=late - timedelta(days=30))])
@@ -274,7 +254,6 @@ def test_quiet_hours_send_nothing(tmp_path):
     sent, send = collector()
     scheduler.send_morning(store, send, FakeClient(), late, str(tmp_path))
     scheduler.send_checkin(store, send, late, str(tmp_path))
-    scheduler.send_weekly_review(store, send, late)
     assert sent == []
 
 
@@ -285,23 +264,7 @@ def test_cron_times():
     fields = sorted(
         (str(job.trigger.fields[4]), str(job.trigger.fields[5])) for job in sched.get_jobs()
     )  # (day_of_week, hour)
-    assert fields == [("*", "14"), ("*", "9"), ("sun", "10")]
-
-
-def test_on_sunday_the_frog_and_the_review_both_stay_answerable(tmp_path):
-    frog = _task(1, deadline=SUNDAY.date() - timedelta(days=1), created_at=SUNDAY)
-    old = _task(2, created_at=SUNDAY - timedelta(days=20))
-    store = fresh([frog, old])
-    sent, send = collector()
-    morning = SUNDAY.replace(hour=9)
-    scheduler.send_morning(store, send, FakeClient(), morning, str(tmp_path))
-    scheduler.send_weekly_review(store, send, SUNDAY)
-    scheduler.send_checkin(store, send, SUNDAY.replace(hour=14), str(tmp_path))
-    assert len(sent) == 3
-    later = SUNDAY.replace(hour=15)
-    assert replies.answer(store, "d", later) == "Done, nice."
-    assert replies.answer(store, "x 1", later) == "Dropped 1."
-    assert store.list_pending() == []
+    assert fields == [("*", "14"), ("*", "9")]
 
 
 def test_checkin_with_an_unreadable_vault_sends_nothing(tmp_path, caplog):

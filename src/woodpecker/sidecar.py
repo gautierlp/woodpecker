@@ -35,22 +35,17 @@ CREATE TABLE IF NOT EXISTS frog_state (
 );
 """
 
-# The prompts a reply answers, one row per slot. The "frog" slot holds the last frog,
-# reframe or step prompt (a lone letter answers it); the "weekly" slot holds the Sunday
-# review (x 1 3 / w 2 answers it). Two slots, so the review and the frog prompts of the
-# same Sunday do not replace each other. A new prompt replaces the one in its slot.
+# The one prompt a letter answers: the last frog, reframe or step prompt. A single row, so
+# a new prompt replaces the old one.
 _PROMPT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS open_prompt (
-    slot TEXT PRIMARY KEY CHECK (slot IN ('frog', 'weekly')),
+    id INTEGER PRIMARY KEY CHECK (id = 1),
     kind TEXT NOT NULL,
     task_ids TEXT NOT NULL,
     sent_at TEXT NOT NULL,
     pending_drop_at TEXT
 );
 """
-
-FROG_SLOT = "frog"
-WEEKLY_SLOT = "weekly"
 
 
 @dataclass(frozen=True)
@@ -63,7 +58,7 @@ class FrogDay:
 
 @dataclass(frozen=True)
 class OpenPrompt:
-    kind: str  # replies.FROG, REFRAME, WEEKLY or STEP
+    kind: str  # replies.FROG, REFRAME or STEP
     task_ids: list[int]
     sent_at: datetime
     pending_drop_at: datetime | None  # set by a first "x" or "n"
@@ -216,24 +211,19 @@ def clear_tomorrows(conn: sqlite3.Connection, task_id: int) -> None:
     conn.commit()
 
 
-def _slot_of(kind: str) -> str:
-    return WEEKLY_SLOT if kind == "weekly" else FROG_SLOT
-
-
 def set_open_prompt(
     conn: sqlite3.Connection, kind: str, task_ids: list[int], when: datetime
 ) -> None:
     conn.execute(
-        "INSERT INTO open_prompt (slot, kind, task_ids, sent_at, pending_drop_at) "
-        "VALUES (?, ?, ?, ?, NULL) ON CONFLICT(slot) DO UPDATE SET kind = excluded.kind, "
-        "task_ids = excluded.task_ids, sent_at = excluded.sent_at, pending_drop_at = NULL",
-        (_slot_of(kind), kind, ",".join(str(i) for i in task_ids), when.isoformat()),
+        "INSERT OR REPLACE INTO open_prompt (id, kind, task_ids, sent_at, pending_drop_at) "
+        "VALUES (1, ?, ?, ?, NULL)",
+        (kind, ",".join(str(i) for i in task_ids), when.isoformat()),
     )
     conn.commit()
 
 
-def get_open_prompt(conn: sqlite3.Connection, slot: str = FROG_SLOT) -> OpenPrompt | None:
-    row = conn.execute("SELECT * FROM open_prompt WHERE slot = ?", (slot,)).fetchone()
+def get_open_prompt(conn: sqlite3.Connection) -> OpenPrompt | None:
+    row = conn.execute("SELECT * FROM open_prompt WHERE id = 1").fetchone()
     if row is None:
         return None
     raw = row["task_ids"]
@@ -246,14 +236,13 @@ def get_open_prompt(conn: sqlite3.Connection, slot: str = FROG_SLOT) -> OpenProm
 
 
 def set_pending_drop(conn: sqlite3.Connection, when: datetime | None) -> None:
-    # Only the frog slot drops with a confirm; the weekly x drops at once.
     conn.execute(
-        "UPDATE open_prompt SET pending_drop_at = ? WHERE slot = ?",
-        (when.isoformat() if when else None, FROG_SLOT),
+        "UPDATE open_prompt SET pending_drop_at = ? WHERE id = 1",
+        (when.isoformat() if when else None,),
     )
     conn.commit()
 
 
-def clear_open_prompt(conn: sqlite3.Connection, slot: str = FROG_SLOT) -> None:
-    conn.execute("DELETE FROM open_prompt WHERE slot = ?", (slot,))
+def clear_open_prompt(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM open_prompt")
     conn.commit()

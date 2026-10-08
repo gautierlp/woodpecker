@@ -123,10 +123,7 @@ def test_new_setting_names_win_over_the_old_ones(monkeypatch):
 def test_nudge_rhythm_tunables():
     assert config.FOCUS_HOUR == 9
     assert config.CHECKIN_HOUR == 14
-    assert config.WEEKLY_REVIEW_DAY == "sun"
-    assert config.WEEKLY_REVIEW_HOUR == 10
     assert config.REFRAME_AFTER_BUMPS == 3
-    assert config.STALE_REVIEW_DAYS == 14
     assert config.DROP_CONFIRM_MINUTES == 10
     assert config.VAULT_SOON_DAYS == 7
     assert config.STEP_ANSWER_MINUTES == 30

@@ -143,29 +143,6 @@ def test_frog_empty_backlog_is_none():
     assert selection.select_frog([make(1, status=STATUS_DONE)], NOW) is None
 
 
-def test_stale_review_keeps_14_days_and_more_oldest_first():
-    at_14 = make(1, created=NOW - timedelta(days=14))
-    at_13 = make(2, created=NOW - timedelta(days=13))
-    at_40 = make(3, created=NOW - timedelta(days=40))
-    got = selection.select_stale_for_review([at_14, at_13, at_40], NOW)
-    assert [t.id for t in got] == [3, 1]
-
-
-def test_stale_review_skips_tasks_moved_to_a_later_date():
-    old = NOW - timedelta(days=30)
-    later = make(1, created=old, deadline=NOW.date() + timedelta(days=7))
-    today = make(2, created=old, deadline=NOW.date())
-    undated = make(3, created=old - timedelta(days=1))
-    got = selection.select_stale_for_review([later, today, undated], NOW)
-    assert [t.id for t in got] == [3, 2]
-
-
-def test_stale_review_limit():
-    tasks = [make(i, created=NOW - timedelta(days=20 + i)) for i in range(1, 8)]
-    got = selection.select_stale_for_review(tasks, NOW, limit=5)
-    assert [t.id for t in got] == [7, 6, 5, 4, 3]
-
-
 def _vt(text, due=None, now=False, note="n"):
     return VaultTask(text=text, note=note, due=due, now=now)
 

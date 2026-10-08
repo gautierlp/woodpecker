@@ -13,7 +13,7 @@ WELCOME = (
 
 
 def make_recording_send(send, memory, chat_id):
-    """Wrap the raw send so every message Woodpecker initiates (morning, check-in, review) is
+    """Wrap the raw send so every message Woodpecker initiates (morning, check-in) is
     remembered as the chat's pending outbound before going out. That lets a later
     reply like "done" be resolved against the nag it answers."""
 
@@ -45,8 +45,8 @@ async def handle_message(update, context) -> None:
     logger.info("Received message (%d chars)", len(text))
     logger.debug("Inbound message body: %s", text)
     try:
-        # A one-letter reply (or the weekly "x 1 3" form) is answered here, with no Claude
-        # call. Anything else goes to the free-text flow below.
+        # A one-letter reply is answered here, with no Claude call. Anything else goes to
+        # the free-text flow below.
         reply = replies.answer(store, text, now)
         if reply is None:
             reply = _free_text(store, client, memory, chat_id, text, now)

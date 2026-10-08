@@ -9,13 +9,10 @@ QUIET_END_HOUR = 23  # pings stop at 23:00 (hour 23 and later is quiet)
 # gentle poke, Low/unset gets nudged toward dropping. See selection.priority_band.
 PRIORITY_HIGH_MIN = 3  # priority >= 3 -> high band
 PRIORITY_MID_MIN = 1  # priority 1-2 -> mid band; 0 -> low band
-# The nudge rhythm (spec 2026-10-08): one morning message, one check-in, one weekly review.
+# The nudge rhythm (spec 2026-10-08): one morning message and one check-in, every day.
 FOCUS_HOUR = 9
 CHECKIN_HOUR = 14
-WEEKLY_REVIEW_DAY = "sun"  # APScheduler day_of_week
-WEEKLY_REVIEW_HOUR = 10
 REFRAME_AFTER_BUMPS = 3  # the 3rd "t" on a frog turns the next morning into the reframe question
-STALE_REVIEW_DAYS = 14  # pending this long or more -> listed in the weekly review
 DROP_CONFIRM_MINUTES = 10  # a second "x" within this window drops the task
 VAULT_SOON_DAYS = 7  # the morning lists vault tasks due within this many days
 STEP_ANSWER_MINUTES = 30  # after "s", the next message within this window becomes the new title

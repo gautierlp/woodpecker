@@ -132,19 +132,6 @@ def test_open_prompt_round_trip_and_replace(tmp_conn):
     )
 
 
-def test_the_weekly_prompt_has_its_own_slot(tmp_conn):
-    sidecar.set_open_prompt(tmp_conn, "frog", [7], AT)
-    sidecar.set_open_prompt(tmp_conn, "weekly", [3, 4], AT)
-    assert sidecar.get_open_prompt(tmp_conn).task_ids == [7]
-    weekly = sidecar.get_open_prompt(tmp_conn, sidecar.WEEKLY_SLOT)
-    assert weekly == sidecar.OpenPrompt(
-        kind="weekly", task_ids=[3, 4], sent_at=AT, pending_drop_at=None
-    )
-    sidecar.clear_open_prompt(tmp_conn, sidecar.WEEKLY_SLOT)
-    assert sidecar.get_open_prompt(tmp_conn, sidecar.WEEKLY_SLOT) is None
-    assert sidecar.get_open_prompt(tmp_conn).task_ids == [7]
-
-
 def test_open_prompt_pending_drop_and_clear(tmp_conn):
     sidecar.set_open_prompt(tmp_conn, "frog", [7], AT)
     sidecar.set_pending_drop(tmp_conn, AT)

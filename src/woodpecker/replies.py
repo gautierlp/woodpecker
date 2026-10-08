@@ -1,71 +1,46 @@
-"""Deterministic answers to the one-letter replies (d, o, t, x, s, n) and the weekly review
-forms (x 1 3, w 2). No Claude call: the letter is parsed here and applied through the
-Store, against the last prompt the bot sent (the sidecar's open_prompt: a lone letter
-answers the frog slot, a weekly form the weekly slot). answer() returns None for any text
-that is not such a reply, so the caller sends it to the free-text flow."""
+"""Deterministic answers to the one-letter replies (d, o, t, x, s, n). No Claude call: the
+letter is parsed here and applied through the Store, against the last prompt the bot sent
+(the sidecar's open_prompt). answer() returns None for any text that is not such a reply,
+so the caller sends it to the free-text flow."""
 
 import logging
-import re
 from datetime import datetime, timedelta
 
-from . import config, render, sidecar
+from . import config, render
 
 logger = logging.getLogger(__name__)
 
 # The kinds of open prompt a letter can answer.
 FROG = "frog"
 REFRAME = "reframe"
-WEEKLY = "weekly"
 STEP = "step"  # after "s": the next message is the smaller step
 
 NOTHING_OPEN = "Nothing to answer right now."
 NOT_FOUND = "Couldn't find that one."
-WEEKLY_HINT = "For the review, reply like x 1 3 or w 2."
 
 _ALLOWED = {FROG: {"d", "o", "t", "x"}, REFRAME: {"s", "n", "x"}}
 _LEGEND = {FROG: render.FROG_LEGEND, REFRAME: render.REFRAME_LEGEND}
 _LETTERS = {"d", "o", "t", "x", "s", "n"}
-# A weekly group is a letter then numbers split by spaces or commas: "x 1 3", "x1,3",
-# "w 2". Several groups may follow each other: "x 1, 3 w2".
-_NUMBERS = r"\d+(?:(?:\s*,\s*|\s+)\d+)*"
-_WEEKLY_FORM = re.compile(rf"^(?:[xw]\s*{_NUMBERS}\s*)+$")
-_WEEKLY_GROUP = re.compile(rf"([xw])\s*({_NUMBERS})")
 
 
 def answer(store, text: str, now: datetime) -> str | None:
     prompt = store.get_open_prompt()
     reply = text.strip().lower()
     if prompt is not None and prompt.kind == STEP:
-        if not _is_reply(reply):
+        if reply not in _LETTERS:
             step = _smaller_step(store, prompt, text.strip(), now)
             if step is not None:
                 return step
-        # A letter or a weekly form is not a step: close the window, read the text as usual.
+        # A letter is not a step: close the window, read the text as usual.
         store.clear_open_prompt()
         prompt = None
-    if _WEEKLY_FORM.match(reply):
-        return _weekly_form(store, prompt, reply, now)
     if reply not in _LETTERS:
         return None
     if prompt is None:
-        # A lone letter answers only the frog slot; hint at the form if a review waits.
-        return WEEKLY_HINT if store.get_open_prompt(sidecar.WEEKLY_SLOT) else NOTHING_OPEN
+        return NOTHING_OPEN
     if reply not in _ALLOWED[prompt.kind]:
         return f"Reply with one letter: {_LEGEND[prompt.kind]}"
     return _letter(store, prompt, reply, now)
-
-
-def _is_reply(reply: str) -> bool:
-    return reply in _LETTERS or bool(_WEEKLY_FORM.match(reply))
-
-
-def _weekly_form(store, frog_prompt, reply: str, now: datetime) -> str:
-    weekly = store.get_open_prompt(sidecar.WEEKLY_SLOT)
-    if weekly is not None:
-        return _weekly(store, weekly.task_ids, reply, now)
-    if frog_prompt is not None:
-        return f"Reply with one letter: {_LEGEND[frog_prompt.kind]}"
-    return NOTHING_OPEN
 
 
 def _letter(store, prompt, letter: str, now: datetime) -> str:
@@ -124,30 +99,3 @@ def _smaller_step(store, prompt, text: str, now: datetime) -> str | None:
     store.clear_tomorrows(task_id)
     logger.info("reply %s rewrite", task_id)
     return f'Now the task is "{task.text}".' if task else NOT_FOUND
-
-
-def _weekly(store, task_ids: list[int], reply: str, now: datetime) -> str:
-    dropped, moved, missing = [], [], []
-    for letter, numbers in _WEEKLY_GROUP.findall(reply):
-        for n in (int(part) for part in re.findall(r"\d+", numbers)):
-            if not 1 <= n <= len(task_ids):
-                missing.append(n)
-                continue
-            task_id = task_ids[n - 1]
-            if letter == "x":
-                store.drop_task(task_id)
-                dropped.append(n)
-            else:
-                store.reschedule_task(task_id, now.date() + timedelta(days=7), None)
-                moved.append(n)
-            logger.info("reply %s weekly-%s", task_id, letter)
-    if dropped or moved:
-        store.clear_open_prompt(sidecar.WEEKLY_SLOT)
-    parts = []
-    if dropped:
-        parts.append(f"Dropped {', '.join(map(str, dropped))}.")
-    if moved:
-        parts.append(f"Moved {', '.join(map(str, moved))} to next week.")
-    if missing:
-        parts.append(f"No {', '.join(map(str, missing))} in the list.")
-    return " ".join(parts)

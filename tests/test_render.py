@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from woodpecker import render
@@ -205,16 +205,4 @@ def test_checkin_text():
     )
     assert render.render_checkin(task, started=True, legend=render.FROG_LEGEND).startswith(
         'How is "task 1" going?\n'
-    )
-
-
-def test_weekly_review_text():
-    old = _task(1, created_at=NOW - timedelta(days=30))
-    older = _task(2, created_at=NOW - timedelta(days=45))
-    assert render.render_weekly_review([older, old], NOW) == (
-        "Weekly review: these have waited 14 days or more.\n"
-        "1. task 2 (45d)\n"
-        "2. task 1 (30d)\n"
-        "\n"
-        "Reply like x 1 3 to drop 1 and 3, w 2 to move 2 to next week. The rest stay."
     )

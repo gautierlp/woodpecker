@@ -1,6 +1,5 @@
 from datetime import date, datetime, timedelta
 
-from . import config
 from .models import Task
 from .selection import order_backlog
 from .vault import VaultTask
@@ -121,12 +120,3 @@ def render_vault_unreadable(reason: str) -> str:
 def render_checkin(task: Task, started: bool, legend: str) -> str:
     line = f'How is "{task.text}" going?' if started else f'Still on for "{task.text}" today?'
     return f"{line}\n{legend}"
-
-
-def render_weekly_review(tasks: list[Task], now: datetime) -> str:
-    lines = [f"Weekly review: these have waited {config.STALE_REVIEW_DAYS} days or more."]
-    for i, task in enumerate(tasks, 1):
-        lines.append(f"{i}. {task.text} ({(now - task.created_at).days}d)")
-    lines.append("")
-    lines.append("Reply like x 1 3 to drop 1 and 3, w 2 to move 2 to next week. The rest stay.")
-    return "\n".join(lines)
