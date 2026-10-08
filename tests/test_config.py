@@ -121,3 +121,26 @@ def test_new_setting_names_win_over_the_old_ones(monkeypatch):
     monkeypatch.setenv("JOLT_DB_PATH", "data/old.db")
     monkeypatch.setenv("WOODPECKER_DB_PATH", "data/new.db")
     assert config.sidecar_path() == "data/new.db"
+
+
+def test_nudge_rhythm_tunables():
+    assert config.FOCUS_HOUR == 9
+    assert config.CHECKIN_HOUR == 14
+    assert config.WEEKLY_REVIEW_DAY == "sun"
+    assert config.WEEKLY_REVIEW_HOUR == 10
+    assert config.REFRAME_AFTER_BUMPS == 3
+    assert config.STALE_REVIEW_DAYS == 14
+    assert config.DROP_CONFIRM_MINUTES == 10
+    assert config.VAULT_SOON_DAYS == 7
+    assert config.STEP_ANSWER_MINUTES == 30
+
+
+def test_vault_path_defaults_to_the_container_mount(monkeypatch):
+    monkeypatch.delenv("WOODPECKER_VAULT_PATH", raising=False)
+    monkeypatch.delenv("JOLT_VAULT_PATH", raising=False)
+    assert config.vault_path() == "/vault"
+
+
+def test_vault_path_reads_the_env(monkeypatch):
+    monkeypatch.setenv("WOODPECKER_VAULT_PATH", "/tmp/v")
+    assert config.vault_path() == "/tmp/v"

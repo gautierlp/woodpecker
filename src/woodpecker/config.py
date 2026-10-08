@@ -18,6 +18,16 @@ LONG_DURATION_SECONDS = (
     3600  # nags treat an estimate >= this as "long" (block time, not "just do it")
 )
 DAILY_FOCUS_HOUR = 6
+# The nudge rhythm (spec 2026-10-08): one morning message, one check-in, one weekly review.
+FOCUS_HOUR = 9
+CHECKIN_HOUR = 14
+WEEKLY_REVIEW_DAY = "sun"  # APScheduler day_of_week
+WEEKLY_REVIEW_HOUR = 10
+REFRAME_AFTER_BUMPS = 3  # the 3rd "t" on a frog turns the next morning into the reframe question
+STALE_REVIEW_DAYS = 14  # pending this long or more -> listed in the weekly review
+DROP_CONFIRM_MINUTES = 10  # a second "x" within this window drops the task
+VAULT_SOON_DAYS = 7  # the morning lists vault tasks due within this many days
+STEP_ANSWER_MINUTES = 30  # after "s", the next message within this window becomes the new title
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"
 # USD per million tokens for MODEL, from Anthropic's pricing. Update these together with
@@ -84,6 +94,11 @@ def log_file() -> str | None:
     # on every redeploy, which was wiping the whole history. Set WOODPECKER_LOG_FILE="" to
     # disable file logging (local runs, tests).
     return _setting("LOG_FILE", "logs/woodpecker.log") or None
+
+
+def vault_path() -> str:
+    # The Obsidian vault, bind-mounted read-only (see docker-compose.yml).
+    return _setting("VAULT_PATH", "/vault")
 
 
 def call_cost_usd(input_tokens: int, output_tokens: int) -> float:
