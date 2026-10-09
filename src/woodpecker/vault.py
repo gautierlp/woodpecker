@@ -14,6 +14,9 @@ BOX = re.compile(r"^\s*[-*] \[ \] (.*)$")
 DUE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
 NOW = "⏫"
 FENCE = "```"
+BOLD = re.compile(r"\*\*|__")
+LINK = re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]")
+SENTENCE_END = re.compile(r"[.!?] ")
 # Dated records, templates and build plans hold checkboxes that are not tasks.
 SKIP_DIRS = {
     ".obsidian",
@@ -35,7 +38,7 @@ class VaultUnreadable(Exception):
 @dataclass(frozen=True)
 class VaultTask:
     text: str
-    note: str  # the note's file name without .md
+    note: str  # the note's file name without .md, or the folder name for a card
     due: date | None
     now: bool  # marked ⏫: for this week
 
@@ -50,9 +53,33 @@ def _due(body: str) -> date | None:
         return None
 
 
+def _note_name(path: Path) -> str:
+    # A card (_project.md, _area.md) has the same file name in every folder: the folder
+    # is what names it.
+    return path.parent.name if path.stem.startswith("_") else path.stem
+
+
 def _task(path: Path, body: str) -> VaultTask:
     text = DUE.sub("", body).replace(NOW, "")
-    return VaultTask(text=" ".join(text.split()), note=path.stem, due=_due(body), now=NOW in body)
+    return VaultTask(
+        text=" ".join(text.split()), note=_note_name(path), due=_due(body), now=NOW in body
+    )
+
+
+def short_text(text: str, limit: int = 80) -> str:
+    """A vault task as one plain line for the phone: no Markdown (Telegram gets plain
+    text), only the first sentence, at most `limit` characters. The note holds the rest."""
+    text = LINK.sub(lambda m: m.group(1).rsplit("/", 1)[-1], BOLD.sub("", text))
+    text = " ".join(text.split())
+    end = SENTENCE_END.search(text)
+    if end:
+        text = text[: end.start() + 1]
+    if len(text) > limit:
+        cut = text[: limit - 1]
+        if " " in cut:
+            cut = cut.rsplit(" ", 1)[0]
+        text = cut.rstrip(",;:") + "…"
+    return text
 
 
 def read_file(path: Path) -> list[VaultTask]:
