@@ -14,4 +14,4 @@ jobs:
       - name: Build the message in the running container
         run: |
           cd /home/gautier/docker/woodpecker
-          docker compose exec -T -e WOODPECKER_LOG_FILE= woodpecker python -m woodpecker.preview
+          docker compose exec -T -e WOODPECKER_LOG_FILE= woodpecker uv run python -m woodpecker.preview
