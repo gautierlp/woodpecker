@@ -1,8 +1,11 @@
 name: Preview the morning message
 
-# Manual only. Prints the morning message with live data; sends nothing, writes nothing.
+# Manual, or a push to the preview-morning branch (the agent token cannot dispatch).
+# Prints the morning message with live data; sends nothing, writes nothing.
 on:
   workflow_dispatch: {}
+  push:
+    branches: [preview-morning]
 
 jobs:
   preview:
