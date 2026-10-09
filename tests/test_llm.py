@@ -4,8 +4,9 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from woodpecker import llm
+from woodpecker import config, llm
 from woodpecker.models import PRIORITY_IMPORTANT, STATUS_PENDING, Task
+from woodpecker.vault import VaultTask
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -631,3 +632,48 @@ def test_write_reframe_asks_size_or_owner():
     system = call["system"].lower()
     assert "the bot adds" in system
     assert "em dash" in system
+
+
+def test_write_focus_gives_the_day_other_tasks_and_vault_notes():
+    client = _ok_client()
+    frog = replace(_high_task(id=1), text="Send documents to the doctor")
+    other = replace(_high_task(id=2), text="Gather documents for the doctor")
+    note = VaultTask(
+        text="**File the protocole de soins for ALD.** Not retroactive.",
+        note="protection",
+        due=None,
+        now=True,
+    )
+    llm.write_focus(
+        frog, datetime(2026, 10, 9, 9, tzinfo=TZ), client, others=[frog, other], vault_lines=[note]
+    )
+    user = client.messages.calls[0]["messages"][0]["content"]
+    assert "Today: Friday 2026-10-09." in user
+    assert "Other open tasks:\n- Gather documents for the doctor" in user
+    assert user.count("Send documents to the doctor") == 1
+    assert "Vault notes:\n- File the protocole de soins for ALD. (protection)" in user
+
+
+def test_write_focus_caps_the_other_tasks():
+    client = _ok_client()
+    others = [replace(_high_task(id=i), text=f"other {i}") for i in range(2, 40)]
+    llm.write_focus(_high_task(id=1), datetime(2026, 10, 9, 9, tzinfo=TZ), client, others=others)
+    user = client.messages.calls[0]["messages"][0]["content"]
+    assert user.count("\n- other ") == config.FOCUS_MAX_OTHER_TASKS == 25
+
+
+def test_write_focus_without_context_has_no_empty_sections():
+    client = _ok_client()
+    llm.write_focus(_high_task(), datetime(2026, 10, 9, 9, tzinfo=TZ), client)
+    user = client.messages.calls[0]["messages"][0]["content"]
+    assert "Other open tasks" not in user
+    assert "Vault notes" not in user
+
+
+def test_write_focus_forbids_invented_places():
+    client = _ok_client()
+    llm.write_focus(_high_task(), datetime(2026, 10, 9, 9, tzinfo=TZ), client)
+    system = client.messages.calls[0]["system"].lower()
+    assert "from the context" in system
+    assert "do not invent a tool, site or place" in system
+    assert "write down what the task needs" in system

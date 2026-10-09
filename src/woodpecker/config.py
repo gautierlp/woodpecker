@@ -16,6 +16,7 @@ REFRAME_AFTER_BUMPS = 3  # the 3rd "t" on a frog turns the next morning into the
 DROP_CONFIRM_MINUTES = 10  # a second "x" within this window drops the task
 VAULT_SOON_DAYS = 7  # the morning lists vault tasks due within this many days
 VAULT_MORNING_MAX = 3  # vault lines in the morning; the rest is counted in the footer
+FOCUS_MAX_OTHER_TASKS = 25  # other task titles Claude sees when it writes the first step
 STEP_ANSWER_MINUTES = 30  # after "s", the next message within this window becomes the new title
 TIMEZONE = "Europe/Paris"
 MODEL = "claude-haiku-4-5-20251001"

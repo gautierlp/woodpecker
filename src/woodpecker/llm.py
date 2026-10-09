@@ -6,7 +6,8 @@ from anthropic import Anthropic
 
 from . import config, render
 from .models import STATUS_PENDING, Task
-from .selection import BAND_HIGH, priority_band
+from .selection import BAND_HIGH, order_backlog, priority_band
+from .vault import VaultTask, short_text
 
 logger = logging.getLogger(__name__)
 
@@ -351,7 +352,30 @@ _NO_EM_DASH = (
 )
 
 
-def write_focus(frog: Task, now: datetime, client) -> str:
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _focus_context(frog: Task, now: datetime, others, vault_lines) -> str:
+    """What Claude needs for a specific first step: the day, the other open tasks and the
+    vault notes of the morning. A title alone gave a generic step on 2026-10-09."""
+    lines = [f"Today: {_DAYS[now.weekday()]} {now.date().isoformat()}."]
+    titles = [t.text for t in order_backlog(list(others)) if t.id != frog.id]
+    if titles:
+        lines.append("Other open tasks:")
+        lines += [f"- {text}" for text in titles[: config.FOCUS_MAX_OTHER_TASKS]]
+    if vault_lines:
+        lines.append("Vault notes:")
+        lines += [f"- {short_text(v.text)} ({v.note})" for v in vault_lines]
+    return "\n".join(lines)
+
+
+def write_focus(
+    frog: Task,
+    now: datetime,
+    client,
+    others: list[Task] = (),
+    vault_lines: list[VaultTask] = (),
+) -> str:
     """The morning lead: the frog in plain words plus one first step that takes under 10
     minutes. No guilt and no count of days avoided: guilt made Gautier close the message."""
     system = (
@@ -359,6 +383,10 @@ def write_focus(frog: Task, now: datetime, client) -> str:
         "Line 1: name the task plainly as today's one thing. "
         "Line 2: start with 'First step:' and give one concrete action that takes under "
         "10 minutes, for example 'open the Doctolib page', not 'book the doctor'. "
+        "Build the step from the context: the other open tasks and the vault notes often "
+        "hold the real next step. Do not invent a tool, site or place that the context does "
+        "not name. If the context gives nothing specific, the step is to write down what "
+        "the task needs. "
         "No guilt, no count of days, no mention of how often it was put off. " + _NO_EM_DASH
     )
     bits = [f"Task: {frog.text}"]
@@ -369,6 +397,7 @@ def write_focus(frog: Task, now: datetime, client) -> str:
         bits.append(f"in {frog.project_name}")
     details_line = f" Notes: {frog.details}." if frog.details else ""
     user = ", ".join(bits) + "." + details_line
+    user += "\n\n" + _focus_context(frog, now, others, vault_lines)
     response = client.messages.create(
         model=config.MODEL,
         max_tokens=200,

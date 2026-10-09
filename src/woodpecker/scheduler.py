@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from . import config, llm, render, vault
@@ -10,18 +10,14 @@ from .selection import is_quiet_hours, select_frog, select_vault_due, select_vau
 logger = logging.getLogger(__name__)
 
 
-def _vault_part(
-    vault_path: str, today: date, select, render_lines, report_unreadable: bool = True
-) -> str:
-    """The vault text of a message. In the morning a read error becomes one line: a missing
-    mount must never silence the frog. The check-in passes report_unreadable=False: the
-    morning already said it, and an error alone is no reason to send a check-in."""
+def _read_vault(vault_path: str) -> tuple[list[vault.VaultTask], str | None]:
+    """The vault tasks, or an empty list and the reason when the vault cannot be read.
+    A missing mount must never silence the frog."""
     try:
-        tasks = vault.read_vault(Path(vault_path))
+        return vault.read_vault(Path(vault_path)), None
     except (vault.VaultUnreadable, OSError) as exc:
         logger.warning("Vault unreadable at %s: %s", vault_path, exc)
-        return render.render_vault_unreadable(str(exc)) if report_unreadable else ""
-    return render_lines(select(tasks, today), today)
+        return [], str(exc)
 
 
 def _is_reframe(store, task_id: int) -> bool:
@@ -38,7 +34,7 @@ def _pick_frog(store, tasks: list, now: datetime):
     return select_frog(tasks, now)
 
 
-def _frog_part(store, client, frog, now: datetime) -> str:
+def _frog_part(store, client, frog, now: datetime, others: list, vault_lines: list) -> str:
     store.record_frog(now.date(), frog.id)
     if _is_reframe(store, frog.id):
         try:
@@ -51,7 +47,7 @@ def _frog_part(store, client, frog, now: datetime) -> str:
         store.set_open_prompt(REFRAME, [frog.id], now)
         return f"{lead}\n\n{render.REFRAME_LEGEND}"
     try:
-        lead = llm.write_focus(frog, now, client)
+        lead = llm.write_focus(frog, now, client, others=others, vault_lines=vault_lines)
     except Exception:
         logger.exception("Morning prose failed; sending the plain line")
         lead = f'Today: "{frog.text}".'
@@ -64,6 +60,9 @@ def send_morning(store, send, client, now: datetime, vault_path: str) -> None:
     if is_quiet_hours(now):
         logger.info("Skipping morning: quiet hours")
         return
+    # The vault is read once: the same reminders feed Claude's first step and the block.
+    vault_tasks, unreadable = _read_vault(vault_path)
+    reminders = select_vault_reminders(vault_tasks, now.date())
     parts = []
     try:
         tasks = store.list_pending()
@@ -77,10 +76,11 @@ def send_morning(store, send, client, now: datetime, vault_path: str) -> None:
             parts.append("Backlog empty. Nothing to chase today.")
         else:
             logger.info("frog %s", frog.id)
-            parts.append(_frog_part(store, client, frog, now))
-    block = _vault_part(vault_path, now.date(), select_vault_reminders, render.render_vault_block)
-    if block:
-        parts.append(block)
+            parts.append(_frog_part(store, client, frog, now, tasks, reminders))
+    if unreadable is not None:
+        parts.append(render.render_vault_unreadable(unreadable))
+    elif reminders:
+        parts.append(render.render_vault_block(reminders, now.date()))
     send("\n\n".join(parts))
 
 
@@ -103,11 +103,12 @@ def send_checkin(store, send, now: datetime, vault_path: str) -> None:
             legend = render.REFRAME_LEGEND if kind == REFRAME else render.FROG_LEGEND
             parts.append(render.render_checkin(task, frog_day.started_at is not None, legend))
             store.set_open_prompt(kind, [task.id], now)
-    due = _vault_part(
-        vault_path, now.date(), select_vault_due, render.render_vault_due, report_unreadable=False
-    )
+    # No unreadable line here: the morning already said it, and an error alone is no
+    # reason to send a check-in.
+    vault_tasks, _ = _read_vault(vault_path)
+    due = select_vault_due(vault_tasks, now.date())
     if due:
-        parts.append(due)
+        parts.append(render.render_vault_due(due, now.date()))
     if not parts:
         logger.info("Skipping check-in: nothing useful to say")
         return

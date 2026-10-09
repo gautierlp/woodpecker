@@ -164,6 +164,30 @@ def test_morning_names_a_frog_with_the_legend_then_the_vault(tmp_path):
     assert store.get_open_prompt().kind == replies.FROG
 
 
+def test_morning_gives_claude_the_other_tasks_and_the_vault(tmp_path):
+    store = fresh([_task(1), _task(2)])
+    sent, send = collector()
+    client = FakeClient()
+    vault_path = _vault(tmp_path, "- [ ] file the return 📅 2026-10-10\n- [ ] far 📅 2027-01-01\n")
+    scheduler.send_morning(store, send, client, MORNING, vault_path)
+    user = client.created[0]["messages"][0]["content"]
+    assert "Other open tasks:\n- task 2" in user
+    assert "Vault notes:\n- file the return (Taxes)" in user
+    assert "far" not in user
+
+
+def test_morning_reads_the_vault_and_the_backlog_once(tmp_path, monkeypatch):
+    store = fresh([_task(1)])
+    sent, send = collector()
+    reads, lists = [], []
+    real_read, real_list = scheduler.vault.read_vault, store.list_pending
+    monkeypatch.setattr(scheduler.vault, "read_vault", lambda p: reads.append(p) or real_read(p))
+    monkeypatch.setattr(store, "list_pending", lambda: lists.append(1) or real_list())
+    scheduler.send_morning(store, send, FakeClient(), MORNING, _vault(tmp_path, "- [ ] a ⏫\n"))
+    assert len(reads) == 1
+    assert len(lists) == 1
+
+
 def test_morning_logs_the_frog(tmp_path, caplog):
     store = fresh([_task(1)])
     sent, send = collector()
@@ -175,10 +199,13 @@ def test_morning_logs_the_frog(tmp_path, caplog):
 def test_morning_with_an_unreadable_vault_still_sends_the_frog(tmp_path):
     store = fresh([_task(1)])
     sent, send = collector()
-    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path / "missing"))
+    client = FakeClient()
+    scheduler.send_morning(store, send, client, MORNING, str(tmp_path / "missing"))
     [text] = sent
-    assert "canned prose" in text
-    assert text.endswith("Vault: not readable (not a folder)")
+    assert text == (
+        "canned prose\n\n" + render.FROG_LEGEND + "\n\nVault: not readable (not a folder)"
+    )
+    assert "Vault notes" not in client.created[0]["messages"][0]["content"]
 
 
 def test_morning_with_a_claude_error_uses_the_plain_line(tmp_path):

@@ -43,15 +43,18 @@ External services:
 Two messages a day at most. At 09:00 the morning names one frog (any pending task:
 overdue first, then most postponed, then oldest) with a Claude-written first step and
 the letter legend `d done · o on it · t tomorrow · x drop`, then a "From the vault:"
-block (vault tasks overdue, due within 7 days, or marked ⏫). The 14:00 check-in fires
+block (vault tasks overdue, due within 7 days, or marked ⏫: at most 3 plain short lines,
+the rest counted as `N more in Obsidian.`). Claude builds the first step from the date,
+the other open tasks and those vault lines, and must not invent a tool, site or place. The 14:00 check-in fires
 only when the frog has no answer yet, or a vault task is due today or overdue. Sunday is
 a day like any other: no weekly review. Gautier answers in plain words ("done", "push it
 to tomorrow"): when a free-text intent completes, drops or reschedules the open frog's
 task, `bot._answer_frog` marks it `d`, `x` or `t` like the letter. The letters are a
 shortcut. After the third `t` on a frog, the next morning asks
 `s smaller step · n not mine to do · x drop`. The vault is mounted read-only at `/vault`
-(`WOODPECKER_VAULT_PATH`); Woodpecker never writes to it. Spec:
-`docs/superpowers/specs/2026-10-08-fewer-sharper-nudges-design.md`.
+(`WOODPECKER_VAULT_PATH`); Woodpecker never writes to it. Specs:
+`docs/superpowers/specs/2026-10-08-fewer-sharper-nudges-design.md` and
+`docs/superpowers/specs/2026-10-09-sharper-morning-design.md`.
 
 ### Division of labour (core principle)
 
