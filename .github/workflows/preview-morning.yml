@@ -1,0 +1,14 @@
+name: Preview the morning message
+
+# Manual only. Prints the morning message with live data; sends nothing, writes nothing.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  preview:
+    runs-on: [self-hosted, jarvis, linux]
+    steps:
+      - name: Build the message in the running container
+        run: |
+          cd /home/gautier/docker/woodpecker
+          docker compose exec -T -e WOODPECKER_LOG_FILE= woodpecker python -m woodpecker.preview
