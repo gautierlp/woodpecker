@@ -159,7 +159,7 @@ def test_morning_names_a_frog_with_the_legend_then_the_vault(tmp_path):
     scheduler.send_morning(store, send, FakeClient(), MORNING, vault_path)
     [text] = sent
     assert text.startswith("canned prose\n\n" + render.FROG_LEGEND)
-    assert text.endswith("• file the return (📅 2026-10-10, Taxes)\nTick these in Obsidian.")
+    assert text.endswith("• file the return (Oct 10, Taxes)\nTick these in Obsidian.")
     assert store.frog_of_day(MORNING.date()).task_id == 1
     assert store.get_open_prompt().kind == replies.FROG
 
@@ -242,9 +242,7 @@ def test_checkin_carries_vault_tasks_due_today(tmp_path):
     sent, send = collector()
     vault_path = _vault(tmp_path, "- [ ] pay rent 📅 2026-10-08\n- [ ] later 📅 2026-10-09\n")
     scheduler.send_checkin(store, send, CHECKIN, vault_path)
-    assert sent == [
-        "Due in the vault today:\n• pay rent (📅 2026-10-08, Taxes)\nTick these in Obsidian."
-    ]
+    assert sent == ["Due in the vault today:\n• pay rent (Oct 08, Taxes)\nTick these in Obsidian."]
 
 
 def test_quiet_hours_send_nothing(tmp_path):

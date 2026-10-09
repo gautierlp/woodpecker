@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from woodpecker import render
+from woodpecker import config, render
 from woodpecker.models import STATUS_PENDING, Task
 from woodpecker.vault import VaultTask
 
@@ -171,7 +171,7 @@ def test_vault_block_exact_text():
     assert render.render_vault_block(tasks, VAULT_TODAY) == (
         "From the vault:\n"
         "• call the bank (overdue, Money)\n"
-        "• file the return (📅 2026-10-19, Taxes)\n"
+        "• file the return (Oct 19, Taxes)\n"
         "• book the service (Car)\n"
         "Tick these in Obsidian."
     )
@@ -179,7 +179,7 @@ def test_vault_block_exact_text():
 
 def test_vault_block_due_today_shows_the_date():
     tasks = [VaultTask(text="pay rent", note="Home", due=VAULT_TODAY, now=False)]
-    assert "• pay rent (📅 2026-10-08, Home)" in render.render_vault_block(tasks, VAULT_TODAY)
+    assert "• pay rent (Oct 08, Home)" in render.render_vault_block(tasks, VAULT_TODAY)
 
 
 def test_vault_block_empty_is_empty():
@@ -190,7 +190,34 @@ def test_vault_block_empty_is_empty():
 def test_vault_due_exact_text():
     tasks = [VaultTask(text="pay rent", note="Home", due=VAULT_TODAY, now=False)]
     assert render.render_vault_due(tasks, VAULT_TODAY) == (
-        "Due in the vault today:\n• pay rent (📅 2026-10-08, Home)\nTick these in Obsidian."
+        "Due in the vault today:\n• pay rent (Oct 08, Home)\nTick these in Obsidian."
+    )
+
+
+def _many(n):
+    return [VaultTask(text=f"task {i}", note="N", due=None, now=True) for i in range(n)]
+
+
+def test_vault_block_shows_three_lines_and_counts_the_rest():
+    assert config.VAULT_MORNING_MAX == 3
+    assert render.render_vault_block(_many(5), VAULT_TODAY) == (
+        "From the vault:\n• task 0 (N)\n• task 1 (N)\n• task 2 (N)\n2 more in Obsidian."
+    )
+
+
+def test_vault_block_of_exactly_three_has_the_tick_footer():
+    assert render.render_vault_block(_many(3), VAULT_TODAY).endswith("Tick these in Obsidian.")
+
+
+def test_vault_due_has_no_cap():
+    assert render.render_vault_due(_many(5), VAULT_TODAY).count("•") == 5
+
+
+def test_vault_line_is_plain_and_short():
+    text = "**Read the Malt stats for the title test** (views, average position). Then more."
+    tasks = [VaultTask(text=text, note="malt-profile", due=date(2026, 10, 13), now=False)]
+    assert render.render_vault_block(tasks, VAULT_TODAY).splitlines()[1] == (
+        "• Read the Malt stats for the title test (views, average position). (Oct 13, malt-profile)"
     )
 
 

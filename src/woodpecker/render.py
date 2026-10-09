@@ -1,8 +1,9 @@
 from datetime import date, datetime, timedelta
 
+from . import config
 from .models import Task
 from .selection import order_backlog
-from .vault import VaultTask
+from .vault import VaultTask, short_text
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -92,21 +93,23 @@ def _vault_line(task: VaultTask, today: date) -> str:
     elif task.due < today:
         when = "overdue, "
     else:
-        when = f"📅 {task.due.isoformat()}, "
-    return f"• {task.text} ({when}{task.note})"
+        when = f"{_MONTHS[task.due.month - 1]} {task.due.day:02d}, "
+    return f"• {short_text(task.text)} ({when}{task.note})"
 
 
-def _vault_lines(header: str, tasks: list[VaultTask], today: date) -> str:
+def _vault_lines(header: str, tasks: list[VaultTask], today: date, limit: int | None = None) -> str:
     if not tasks:
         return ""
-    lines = [header] + [_vault_line(t, today) for t in tasks] + [_VAULT_FOOTER]
-    return "\n".join(lines)
+    shown = tasks[:limit]
+    rest = len(tasks) - len(shown)
+    footer = f"{rest} more in Obsidian." if rest else _VAULT_FOOTER
+    return "\n".join([header] + [_vault_line(t, today) for t in shown] + [footer])
 
 
 def render_vault_block(tasks: list[VaultTask], today: date) -> str:
-    """The morning's vault block. Plain lines with no number: Woodpecker cannot tick a
-    vault box, so nothing here is answerable in the chat."""
-    return _vault_lines("From the vault:", tasks, today)
+    """The morning's vault block, at most VAULT_MORNING_MAX lines. Plain lines with no
+    number: Woodpecker cannot tick a vault box, so nothing here is answerable in the chat."""
+    return _vault_lines("From the vault:", tasks, today, config.VAULT_MORNING_MAX)
 
 
 def render_vault_due(tasks: list[VaultTask], today: date) -> str:
