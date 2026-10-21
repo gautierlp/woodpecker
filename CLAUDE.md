@@ -11,11 +11,11 @@ Private single-user project, not a SaaS. Built to break a specific personal loop
 (postpone, guilt, paralysis), so it sends few messages, each one sharp, by design.
 
 **Status: deployed and running, now backed by Vikunja.** The full app (bot, LLM,
-tasks, staleness, scheduler, entry point) plus Docker and the auto-deploy workflow
+tasks, staleness, scheduler, entry point) plus Docker and auto-deploy
 are in place, and the task store has been refactored onto Vikunja as the source of
 truth. Live on `jarvis` as the `woodpecker` container, checked out at
-`/home/gautier/docker/woodpecker`, with the self-hosted runner `gh-runner-woodpecker`
-(in `/home/gautier/docker/gh-runner-woodpecker`) auto-deploying on push to `main`. The
+`/home/gautier/docker/woodpecker`, redeployed by auto-deploy on jarvis within 5 minutes of a push to `main`
+(homelab `docs/auto-deploy.md`). The
 Telegram handle is still `@jolt_todo_bot` until it is changed in BotFather. The sidecar
 SQLite file (nag state + display snapshot, not tasks) lives in the bind-mounted
 `./data`. See `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for
@@ -165,8 +165,8 @@ Vikunja URL/token/project id, sidecar `WOODPECKER_DB_PATH`, old name `JOLT_DB_PA
 
 Runs on the homelab host `jarvis` (SSH alias) as a Docker container under
 `/home/gautier/docker/<service>/`, next to a separately deployed Vikunja instance
-(`tasks.example.com`) that Woodpecker talks to over its REST API. Auto-deploys on git push via
-a self-hosted GitHub runner, the same pattern as the `fitness-data` service.
+(`tasks.example.com`) that Woodpecker talks to over its REST API. Push to main; auto-deploy on jarvis pulls it within 5 minutes
+(homelab `docs/auto-deploy.md`).
 
 The sidecar SQLite file (nag state + display snapshot only, no tasks) lives in a
 bind-mounted `./data/` directory so it survives restarts and is captured by the

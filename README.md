@@ -125,8 +125,8 @@ It stays quiet from 23:00 to 6:00.
    ```
 
 To run it on a server, `docker compose up -d --build` does the same in a container.
-The workflow in `.github/workflows/deploy.yml` redeploys it on every push to `main`
-from a self-hosted runner.
+On the author's server, a pull-based auto-deploy job redeploys it within 5 minutes
+of a push to `main`.
 
 ### Configuration
 
@@ -244,7 +244,7 @@ your oldest tasks are.
 - [x] Read-only vault reminders
 - [x] Plain-word or letter replies to the frog (`d o t x s n`)
 - [x] Vikunja as the task store
-- [x] Docker deploy with a self-hosted runner
+- [x] Docker deploy, pulled by the server after each push to `main`
 
 See the [open issues](https://github.com/gautierlp/woodpecker/issues) for the rest.
 
