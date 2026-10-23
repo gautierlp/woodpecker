@@ -56,7 +56,6 @@ def _task(id):
         deadline=None,
         created_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
     )
 

@@ -25,7 +25,6 @@ def test_task_constructs():
         deadline=date(2026, 7, 15),
         created_at=datetime(2026, 7, 12, tzinfo=ZoneInfo("Europe/Paris")),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
     )
     assert t.text == "call vet"
@@ -36,7 +35,7 @@ def test_sidecar_path_defaults_when_unset(monkeypatch):
 
     monkeypatch.delenv("WOODPECKER_DB_PATH", raising=False)
     # Deliberately not data/jolt.db: that name belongs to the pre-Vikunja database whose
-    # `tasks` table is not a sidecar schema (see docs/CUTOVER.md). Defaulting to it would
+    # `tasks` table is not a sidecar schema. Defaulting to it would
     # point a fresh deploy with no WOODPECKER_DB_PATH set at the wrong file.
     assert config.sidecar_path() == "data/sidecar.db"
 

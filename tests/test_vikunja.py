@@ -62,7 +62,6 @@ def test_maps_basic_open_task():
     assert t.status == STATUS_PENDING
     assert t.deadline is None
     assert t.position == 12
-    assert t.last_nagged_at is None
     assert t.completed_at is None
 
 

@@ -2,13 +2,6 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
 
-_NAG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS nag_state (
-    task_id INTEGER PRIMARY KEY,
-    last_nagged_at TEXT NOT NULL
-);
-"""
-
 _DISPLAY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS display_snapshot (
     chat_id INTEGER PRIMARY KEY,
@@ -75,26 +68,11 @@ def connect(path: str) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    conn.execute(_NAG_SCHEMA)
     conn.execute(_DISPLAY_SCHEMA)
     conn.execute(_BUMP_SCHEMA)
     conn.execute(_FROG_SCHEMA)
     conn.execute(_PROMPT_SCHEMA)
     conn.commit()
-
-
-def set_last_nagged(conn: sqlite3.Connection, task_id: int, when: datetime) -> None:
-    conn.execute(
-        "INSERT INTO nag_state (task_id, last_nagged_at) VALUES (?, ?) "
-        "ON CONFLICT(task_id) DO UPDATE SET last_nagged_at = excluded.last_nagged_at",
-        (task_id, when.isoformat()),
-    )
-    conn.commit()
-
-
-def last_nagged_map(conn: sqlite3.Connection) -> dict[int, datetime]:
-    rows = conn.execute("SELECT task_id, last_nagged_at FROM nag_state").fetchall()
-    return {row["task_id"]: datetime.fromisoformat(row["last_nagged_at"]) for row in rows}
 
 
 def save_display(conn: sqlite3.Connection, chat_id: int, task_ids: list[int]) -> None:
@@ -155,7 +133,7 @@ def apply_due_snapshot(conn: sqlite3.Connection, due_by_task: dict[int, date | N
 
 
 def prune(conn: sqlite3.Connection, live_ids: set[int]) -> None:
-    for table in ("nag_state", "bump_state"):
+    for table in ("bump_state",):
         ids = {int(r["task_id"]) for r in conn.execute(f"SELECT task_id FROM {table}")}
         stale = ids - live_ids
         if stale:

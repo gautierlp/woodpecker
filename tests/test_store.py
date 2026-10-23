@@ -27,7 +27,6 @@ class FakeVikunja:
             deadline=deadline,
             created_at=datetime.now(timezone.utc),
             status=STATUS_PENDING,
-            last_nagged_at=None,
             completed_at=None,
             position=0,
         )
@@ -70,7 +69,6 @@ def _task(id, **over):
         deadline=None,
         created_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
         position=0,
     )
@@ -82,24 +80,6 @@ def _store(vk):
     c = sidecar.connect(":memory:")
     sidecar.init_db(c)
     return store.Store(vk, c), c
-
-
-def test_list_pending_merges_last_nagged_from_sidecar():
-    vk = FakeVikunja([_task(1), _task(2)])
-    s, c = _store(vk)
-    when = datetime(2026, 7, 15, 9, 0, tzinfo=timezone.utc)
-    sidecar.set_last_nagged(c, 2, when)
-    by_id = {t.id: t for t in s.list_pending()}
-    assert by_id[1].last_nagged_at is None
-    assert by_id[2].last_nagged_at == when
-
-
-def test_mark_nagged_persists_and_shows_next_read():
-    vk = FakeVikunja([_task(1)])
-    s, c = _store(vk)
-    when = datetime(2026, 7, 16, 13, 0, tzinfo=timezone.utc)
-    s.mark_nagged(1, when)
-    assert s.list_pending()[0].last_nagged_at == when
 
 
 def test_complete_calls_vikunja_mark_done():
@@ -136,13 +116,12 @@ def test_drop_already_done_returns_false_and_does_not_delete():
     assert vk.deleted == []
 
 
-def test_list_pending_with_empty_result_does_not_prune_nag_state():
+def test_list_pending_with_empty_result_does_not_prune_bump_state():
     vk = FakeVikunja([])
     s, c = _store(vk)
-    when = datetime(2026, 7, 15, 9, 0, tzinfo=timezone.utc)
-    sidecar.set_last_nagged(c, 42, when)
+    sidecar.apply_due_snapshot(c, {42: date(2026, 7, 18)})
     assert s.list_pending() == []
-    assert sidecar.last_nagged_map(c) == {42: when}
+    assert sidecar.bump_counts(c) == {42: 0}
 
 
 def test_list_pending_injects_bump_count_after_a_forward_move():

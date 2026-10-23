@@ -69,7 +69,6 @@ def _setting(name: str, default: str) -> str:
 def sidecar_path() -> str:
     # data/sidecar.db, not data/jolt.db: the latter is the pre-Vikunja database, still kept
     # on the host as a rollback artifact, and its `tasks` table is not a sidecar schema.
-    # See docs/CUTOVER.md.
     return _setting("DB_PATH", "data/sidecar.db")
 
 

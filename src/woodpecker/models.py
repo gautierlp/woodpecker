@@ -19,7 +19,6 @@ class Task:
     deadline: date | None
     created_at: datetime
     status: str
-    last_nagged_at: datetime | None
     completed_at: datetime | None
     position: int = 0
     estimate_seconds: int | None = None  # from the mdone sentinel in the description

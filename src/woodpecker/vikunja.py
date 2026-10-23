@@ -71,7 +71,6 @@ def vikunja_to_task(raw: dict, project_name: str = "") -> Task:
         deadline=_parse_due(raw.get("due_date")),
         created_at=_parse_dt(raw.get("created")) or datetime.now(_UTC),
         status=STATUS_DONE if done else STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=_parse_dt(raw.get("done_at")) if done else None,
         position=raw.get("position") or 0,
         estimate_seconds=parse_estimate_seconds(description),

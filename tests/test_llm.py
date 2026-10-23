@@ -66,7 +66,6 @@ def _task(id=1):
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
     )
 
@@ -81,7 +80,6 @@ def _ordered_task(id, day):
         deadline=None,
         created_at=datetime(2026, 7, day, tzinfo=TZ),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
     )
 
@@ -166,7 +164,6 @@ def test_prompt_drops_snapshot_task_that_is_no_longer_pending():
         deadline=None,
         created_at=datetime(2026, 7, 1, tzinfo=TZ),
         status="done",
-        last_nagged_at=None,
         completed_at=NOW,
     )
     tool_block = SimpleNamespace(
@@ -392,7 +389,6 @@ def _high_task(id=1, estimate_seconds=None, details="", project_name=""):
         deadline=None,
         created_at=datetime(2026, 7, 3, tzinfo=TZ),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
         estimate_seconds=estimate_seconds,
         details=details,
