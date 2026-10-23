@@ -7,7 +7,7 @@ services:
     environment:
       # WOODPECKER_DB_PATH is intentionally NOT set here: environment: overrides env_file:
       # for the same key in Compose, so hardcoding it would make the .env value
-      # (and the cutover runbook's step to edit it) silently ineffective. It comes
+      # silently ineffective. It comes
       # from .env instead, container-relative to the ./data mount below.
       # A persistent log file on the ./logs mount below, so history survives redeploys
       # (a recreated container otherwise loses its own stdout). Kept out of ./data so it
@@ -16,7 +16,7 @@ services:
       # DEBUG traces message bodies and full Claude I/O; flip to INFO to quieten.
       WOODPECKER_LOG_LEVEL: DEBUG
     volumes:
-      # ./data now holds only the sidecar SQLite (nag state + display snapshot);
+      # ./data now holds only the sidecar SQLite (bump, frog and prompt state + display snapshot);
       # the task backlog itself lives in Vikunja, not on this bind mount.
       - ./data:/app/data
       - ./logs:/app/logs

@@ -28,7 +28,6 @@ class FakeVikunja:
             deadline=deadline,
             created_at=datetime.now(timezone.utc),
             status=STATUS_PENDING,
-            last_nagged_at=None,
             completed_at=None,
             position=0,
         )
@@ -67,7 +66,6 @@ def _task(id, priority=0, deadline=None, created_at=None):
         deadline=deadline,
         created_at=created_at or datetime(2026, 7, 10, tzinfo=TZ),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
         position=0,
     )

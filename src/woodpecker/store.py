@@ -7,7 +7,7 @@ from .models import STATUS_DONE, Task
 
 class Store:
     """The task-storage seam. Vikunja is the source of truth for tasks; the sidecar holds
-    Woodpecker's own nag state and the display snapshot. Returns and accepts the Task dataclass so
+    Woodpecker's own state (bump counts, frog days, display snapshot). Returns and accepts the Task dataclass so
     the rest of Woodpecker is unaware of Vikunja."""
 
     def __init__(self, vikunja, sidecar_conn):
@@ -20,12 +20,8 @@ class Store:
     def list_pending(self) -> list[Task]:
         tasks = self._vk.list_open()
         sidecar.apply_due_snapshot(self._conn, {t.id: t.deadline for t in tasks})
-        nagged = sidecar.last_nagged_map(self._conn)
         counts = sidecar.bump_counts(self._conn)
-        tasks = [
-            replace(t, last_nagged_at=nagged.get(t.id), bump_count=counts.get(t.id, 0))
-            for t in tasks
-        ]
+        tasks = [replace(t, bump_count=counts.get(t.id, 0)) for t in tasks]
         # An empty result is ambiguous between "truly no open tasks" and a broken
         # filter/transient glitch. Only prune when we have at least one live task to
         # prune against, so a flaky response can't wipe everyone's sidecar state.
@@ -37,9 +33,8 @@ class Store:
         task = self._vk.get_task(task_id)
         if task is None:
             return None
-        nagged = sidecar.last_nagged_map(self._conn)
         counts = sidecar.bump_counts(self._conn)
-        return replace(task, last_nagged_at=nagged.get(task.id), bump_count=counts.get(task.id, 0))
+        return replace(task, bump_count=counts.get(task.id, 0))
 
     def complete_task(self, task_id: int, now: datetime) -> Task | None:
         task = self._vk.get_task(task_id)
@@ -64,9 +59,6 @@ class Store:
         if task is None or task.status == STATUS_DONE:
             return False
         return self._vk.delete_task(task_id)
-
-    def mark_nagged(self, task_id: int, when: datetime) -> None:
-        sidecar.set_last_nagged(self._conn, task_id, when)
 
     def save_display(self, chat_id: int, task_ids: list[int]) -> None:
         sidecar.save_display(self._conn, chat_id, task_ids)

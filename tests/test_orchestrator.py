@@ -30,7 +30,6 @@ class FakeStore:
             deadline=deadline,
             created_at=now,
             status=STATUS_PENDING,
-            last_nagged_at=None,
             completed_at=None,
             position=0,
         )

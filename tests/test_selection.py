@@ -22,7 +22,6 @@ def make(
     created=NOW,
     status=STATUS_PENDING,
     position=0,
-    nagged=None,
 ):
     return Task(
         id=id,
@@ -31,7 +30,6 @@ def make(
         deadline=deadline,
         created_at=created,
         status=status,
-        last_nagged_at=nagged,
         completed_at=None,
         position=position,
     )
@@ -45,7 +43,6 @@ def _t(id, position, created="2026-07-10T08:00:00+00:00"):
         deadline=None,
         created_at=datetime.fromisoformat(created),
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
         position=position,
     )

@@ -17,11 +17,10 @@ truth. Live on `jarvis` as the `woodpecker` container, checked out at
 `/home/gautier/docker/woodpecker`, redeployed by auto-deploy on jarvis within 5 minutes of a push to `main`
 (homelab `docs/auto-deploy.md`). The
 Telegram handle is still `@jolt_todo_bot` until it is changed in BotFather. The sidecar
-SQLite file (nag state + display snapshot, not tasks) lives in the bind-mounted
+SQLite file (bump, frog and prompt state + display snapshot, not tasks) lives in the bind-mounted
 `./data`. See `docs/superpowers/specs/2026-07-12-accountability-bot-design.md` for
 the original behavior and rationale, `docs/superpowers/plans/2026-07-12-jolt-implementation.md`
-for the original implementation plan, and `docs/CUTOVER.md` for the Vikunja cutover
-runbook.
+for the original implementation plan.
 
 ## Architecture
 
@@ -80,7 +79,7 @@ Key libraries:
 - `anthropic`: Claude API client
 - `httpx`: Vikunja REST client
 - `APScheduler`: cron-based scheduler (09:00 morning, 14:00 check-in, every day)
-- `sqlite3` (stdlib): sidecar storage (nag state + display snapshot only)
+- `sqlite3` (stdlib): sidecar storage (bump, frog and prompt state + display snapshot only)
 
 ## Code Conventions
 
@@ -113,19 +112,19 @@ src/woodpecker/
   scheduler.py    Job bodies: morning and check-in (wired to APScheduler cron in main.py)
   vikunja.py      VikunjaClient: REST calls to Vikunja (create/list/get/mark done/delete) and
                   the Task <-> Vikunja JSON field mapping
-  sidecar.py      SQLite access for Woodpecker's own state: the nag_state, display_snapshot,
+  sidecar.py      SQLite access for Woodpecker's own state: the display_snapshot,
                   bump_state, frog_state and open_prompt tables (no task data); open_prompt
                   is one row: the frog, reframe or step prompt a letter answers
   store.py        Store: the storage seam the rest of Woodpecker talks to. Combines a
-                  VikunjaClient (task data) and the sidecar connection (nag state,
-                  display snapshot) behind one interface returning Task
+                  VikunjaClient (task data) and the sidecar connection (bump, frog
+                  and prompt state, display snapshot) behind one interface returning Task
   models.py       Task and DailyFocus dataclasses and the status/priority constants
   config.py       Named tunables and environment readers
 ```
 
 Storage is a `Store` seam over two backends: `vikunja.py`'s `VikunjaClient` holds the
 tasks themselves (Vikunja is the source of truth, reached over its REST API), and
-`sidecar.py` holds only what is Woodpecker's own: `nag_state` (`task_id`, `last_nagged_at`)
+`sidecar.py` holds only what is Woodpecker's own: `bump_state`, `frog_state`, `open_prompt`
 and `display_snapshot` (one row per chat: the ordered task ids of the last list
 shown). `store.py` is the only module the rest of Woodpecker (`orchestrator.py`,
 `scheduler.py`) talks to; it returns and accepts the `Task` dataclass so the rest of
@@ -168,7 +167,7 @@ Runs on the homelab host `jarvis` (SSH alias) as a Docker container under
 (`tasks.example.com`) that Woodpecker talks to over its REST API. Push to main; auto-deploy on jarvis pulls it within 5 minutes
 (homelab `docs/auto-deploy.md`).
 
-The sidecar SQLite file (nag state + display snapshot only, no tasks) lives in a
+The sidecar SQLite file (bump, frog and prompt state + display snapshot only, no tasks) lives in a
 bind-mounted `./data/` directory so it survives restarts and is captured by the
 nightly restic to Backblaze B2 backup. The task backlog itself is not backed up by
 Woodpecker; it lives and is backed up as part of the Vikunja deployment.

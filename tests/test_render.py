@@ -19,7 +19,6 @@ def make(id, *, text, priority=0, deadline=None, created_at=FRESH, position=0):
         deadline=deadline,
         created_at=created_at,
         status=STATUS_PENDING,
-        last_nagged_at=None,
         completed_at=None,
         position=position,
     )
