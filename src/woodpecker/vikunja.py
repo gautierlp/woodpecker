@@ -104,6 +104,9 @@ class VikunjaClient:
             timeout=timeout,
         )
         self._list_view_ids: dict[int, int] = {}
+        # Titles of the projects the last list_open skipped because their read failed.
+        # Non-empty means that list is partial.
+        self.skipped_projects: list[str] = []
 
     def close(self) -> None:
         """Close the underlying HTTP connection pool. Woodpecker runs as a long-lived process so
@@ -210,15 +213,18 @@ class VikunjaClient:
             )
             projects = [*projects, (self._project_id, "")]
         tasks: list[Task] = []
+        skipped: list[str] = []
         for project_id, project_name in projects:
             try:
                 tasks.extend(self._list_open_project(project_id, project_name))
             except VikunjaError:
+                skipped.append(project_name or str(project_id))
                 _log.warning(
                     "list_open: skipping project %s (%s), read failed",
                     project_id,
                     project_name,
                 )
+        self.skipped_projects = skipped
         return tasks
 
     def _list_open_project(self, project_id: int, project_name: str) -> list[Task]:
