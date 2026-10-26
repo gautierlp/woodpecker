@@ -219,8 +219,12 @@ def test_list_open_skips_a_project_whose_read_fails_but_keeps_the_others():
             return httpx.Response(200, json=[] if page > 1 else tasks)
         raise AssertionError(f"unexpected path {path}")
 
-    tasks = _client(handler).list_open()
+    c = _client(handler)
+    tasks = c.list_open()
     assert [t.id for t in tasks] == [3]
+    # The skip is reported, so callers know the list is partial.
+    assert c.skipped_projects == ["Broken"]
+    assert _client(_multi_project_handler()).skipped_projects == []
 
 
 def test_list_open_tolerates_a_project_with_no_open_tasks():

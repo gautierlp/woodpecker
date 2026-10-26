@@ -363,3 +363,12 @@ def test_morning_with_vikunja_down_closes_yesterdays_prompt(tmp_path):
     scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
     assert sent[0].startswith("My task list is unreachable this morning.")
     assert store.get_open_prompt() is None
+
+
+def test_morning_says_when_a_project_could_not_be_read(tmp_path):
+    store = fresh([_task(1)])
+    store._vk.skipped_projects = ["Broken"]
+    sent, send = collector()
+    scheduler.send_morning(store, send, FakeClient(), MORNING, str(tmp_path))
+    [text] = sent
+    assert "Could not read Broken: today's pick leaves it out." in text

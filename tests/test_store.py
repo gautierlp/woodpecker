@@ -199,3 +199,16 @@ def test_store_frog_and_prompt_state():
     assert s.get_open_prompt().task_ids == [1]
     s.clear_open_prompt()
     assert s.get_open_prompt() is None
+
+
+def test_list_pending_with_a_skipped_project_keeps_its_bump_state():
+    # Task 7 lives in a project whose read failed. Its bump history must survive the
+    # partial read, and the store must report the skip.
+    vk = FakeVikunja([_task(1, deadline=date(2026, 7, 18))])
+    vk.skipped_projects = ["Broken"]
+    s, c = _store(vk)
+    sidecar.apply_due_snapshot(c, {7: date(2026, 7, 18)})
+    sidecar.apply_due_snapshot(c, {7: date(2026, 7, 19)})
+    assert [t.id for t in s.list_pending()] == [1]
+    assert sidecar.bump_counts(c) == {7: 1}
+    assert s.skipped_projects == ["Broken"]

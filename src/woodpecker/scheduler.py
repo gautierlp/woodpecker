@@ -77,6 +77,9 @@ def send_morning(store, send, client, now: datetime, vault_path: str) -> None:
         else:
             logger.info("frog %s", frog.id)
             parts.append(_frog_part(store, client, frog, now, tasks, reminders))
+        skipped = getattr(store, "skipped_projects", [])
+        if skipped:
+            parts.append(f"Could not read {', '.join(skipped)}: today's pick leaves it out.")
     if unreadable is not None:
         parts.append(render.render_vault_unreadable(unreadable))
     elif reminders:

@@ -13,19 +13,26 @@ class Store:
     def __init__(self, vikunja, sidecar_conn):
         self._vk = vikunja
         self._conn = sidecar_conn
+        # Projects the last list_pending could not read (see VikunjaClient.list_open).
+        self.skipped_projects: list[str] = []
 
     def add_task(self, text: str, priority: str, deadline: date | None, now: datetime) -> Task:
         return self._vk.create_task(text, priority, deadline)
 
     def list_pending(self) -> list[Task]:
         tasks = self._vk.list_open()
-        sidecar.apply_due_snapshot(self._conn, {t.id: t.deadline for t in tasks})
+        self.skipped_projects = list(getattr(self._vk, "skipped_projects", []))
+        # A partial read (a project skipped) must not touch the sidecar: prune would
+        # delete the skipped project's bump rows as if its tasks were gone.
+        partial = bool(self.skipped_projects)
+        if not partial:
+            sidecar.apply_due_snapshot(self._conn, {t.id: t.deadline for t in tasks})
         counts = sidecar.bump_counts(self._conn)
         tasks = [replace(t, bump_count=counts.get(t.id, 0)) for t in tasks]
         # An empty result is ambiguous between "truly no open tasks" and a broken
         # filter/transient glitch. Only prune when we have at least one live task to
         # prune against, so a flaky response can't wipe everyone's sidecar state.
-        if tasks:
+        if tasks and not partial:
             sidecar.prune(self._conn, {t.id for t in tasks})
         return tasks
 
